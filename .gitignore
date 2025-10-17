@@ -1,3 +1,60 @@
-venv
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 
-**/*.pyc
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Swift artifacts
+.build/
+.swift-build/
+*.swiftmodule
+*.swiftdoc
+Package.resolved
+
+# Baseline and test artifacts
+baseline_*.txt
+test_venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.bak
+*.tmp

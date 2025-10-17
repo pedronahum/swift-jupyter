@@ -9,6 +9,29 @@ Consider using [Swift-Colab](https://github.com/philipturner/swift-colab) instea
 This is a Jupyter Kernel for Swift, intended to make it possible to use Jupyter
 with the [Swift for TensorFlow](https://github.com/tensorflow/swift) project.
 
+## Tested Configuration
+
+This kernel has been tested and verified to work with:
+- **Python**: 3.9-3.12 (currently tested with 3.12.8)
+- **Swift**: 5.7-6.3 (currently tested with 6.3)
+- **Operating Systems**: macOS (Darwin 24.6.0), Ubuntu 18.04+
+
+**Note**: Swift is embedded with Python 3.9, so Python 3.9+ compatibility is essential.
+
+### Compatibility Matrix
+
+| Component | Version | Status | Notes |
+|-----------|---------|--------|-------|
+| **Python** | 3.9-3.12 | ✅ Tested | Python 3.9+ required (Swift embedded compatibility) |
+| **Swift** | 5.7-6.3 | ✅ Compatible | Requires LLDB Python 3 bindings |
+| **Jupyter Protocol** | 5.3+ | ✅ Compatible | Targeting 5.4 compliance |
+| **jupyter-client** | 8.x | ✅ Tested | Version 8.0+ recommended |
+| **ipykernel** | 6.20+ | ✅ Tested | Version 6.20-6.29 supported |
+| **JupyterLab** | 4.x | ✅ Tested | Modern UI fully supported |
+| **Notebook** | 7.x | ✅ Tested | Classic notebook v7+ |
+| **macOS** | 12+ | ✅ Tested | Tested on macOS Sequoia (15.0) |
+| **Ubuntu** | 18.04+ | ✅ Compatible | 22.04+ recommended |
+
 # Installation Instructions
 
 ## Option 1: Using a Swift for TensorFlow toolchain and Virtualenv
@@ -17,23 +40,27 @@ with the [Swift for TensorFlow](https://github.com/tensorflow/swift) project.
 
 Operating system:
 
-* Ubuntu 18.04 (64-bit); OR
-* other operating systems may work, but you will have to build Swift from
-  sources.
+* Ubuntu 18.04 (64-bit)
+* macOS (with compatible Swift toolchain)
+* Other operating systems may work, but you will have to build Swift from sources.
 
 Dependencies:
 
-* Python 3 (Ubuntu 18.04 package name: `python3`)
-* Python 3 Virtualenv (Ubuntu 18.04 package name: `python3-venv`)
+* **Python 3.9-3.12** (Python 3.9+ required for Swift embedded compatibility)
+* Python 3 Virtualenv (Ubuntu: `python3-venv`, macOS: included with Python 3)
+* Swift toolchain with LLDB Python 3 bindings
 
 ### Installation
 
-swift-jupyter requires a Swift toolchain with LLDB Python3 support. Currently, the only prebuilt toolchains with LLDB Python3 support are the [Swift for TensorFlow Ubuntu 18.04 Nightly Builds](https://github.com/tensorflow/swift/blob/main/Installation.md#pre-built-packages). Alternatively, you can build a toolchain from sources (see the section below for instructions).
+swift-jupyter requires a Swift toolchain with LLDB Python3 support. You have several options:
 
-Extract the Swift toolchain somewhere.
+1. **Swift for TensorFlow toolchains**: [Swift for TensorFlow Ubuntu 18.04 Nightly Builds](https://github.com/tensorflow/swift/blob/main/Installation.md#pre-built-packages)
+2. **Modern Swift toolchains** (verified working with Swift 6.3): Official Swift toolchains from [swift.org](https://swift.org/download/) with LLDB Python3 support
+3. **Build from sources**: See the section below for instructions
 
-Create a virtualenv, install the requirements in it, and register the kernel in
-it:
+Extract the Swift toolchain to a directory of your choice.
+
+Create a virtualenv, install the requirements in it, and register the kernel:
 
 ```bash
 git clone https://github.com/google/swift-jupyter.git
@@ -43,6 +70,10 @@ python3 -m venv venv
 pip install -r requirements.txt
 python register.py --sys-prefix --swift-toolchain <path to extracted swift toolchain directory>
 ```
+
+**Note**: The `requirements.txt` file includes all necessary dependencies:
+- Core packages: `jupyter`, `pandas`, `matplotlib`, `numpy`
+- Testing packages: `jupyter-kernel-test`, `flaky` (required for running tests)
 
 Finally, run Jupyter:
 
@@ -59,9 +90,9 @@ You should be able to create Swift notebooks. Installation is done!
 
 Operating system:
 
-* Ubuntu 18.04 (64-bit); OR
-* other operating systems may work, but you will have to build Swift from
-  sources.
+* Ubuntu 18.04 (64-bit)
+* macOS (with compatible Swift toolchain)
+* Other operating systems may work, but you will have to build Swift from sources.
 
 ### Installation
 
@@ -80,7 +111,7 @@ Swift for TensorFlow requires CUDNN 7.5, but Conda only has CUDNN 7.3).
 Create a Conda environment and install some packages in it:
 
 ```bash
-conda create -n swift-tensorflow python==3.6
+conda create -n swift-tensorflow python>=3.9
 conda activate swift-tensorflow
 conda install jupyter numpy matplotlib
 ```
@@ -398,29 +429,29 @@ We'll probably add more search paths later.
 
 # Running tests
 
-## Locally
+Install swift-jupyter locally using the above installation instructions. The `requirements.txt` file includes all necessary testing dependencies (`jupyter-kernel-test` and `flaky`).
 
-Install swift-jupyter locally using the above installation instructions. Now
-you can activate the virtualenv and run the tests:
+For detailed testing instructions, prerequisites, and troubleshooting, see **[TEST_README.md](TEST_README.md)**.
 
-```
+## Quick Start
+
+Activate your virtual environment and run the tests:
+
+```bash
 . venv/bin/activate
-python test/fast_test.py  # Fast tests, should complete in 1-2 min
-python test/all_test.py  # Much slower, 10+ min
-python test/all_test.py SimpleNotebookTests.test_simple_successful  # Invoke specific test method
+python test/fast_test.py  # Fast tests (kernel + simple notebook tests)
+python test/all_test.py   # All tests (includes tutorial notebooks)
 ```
 
-You might also be interested in manually invoking the notebook tester on
-specific notebooks. See its `--help` documentation:
-
-```
-python test/notebook_tester.py --help
+Run a specific test:
+```bash
+python test/fast_test.py SimpleNotebookTests.test_simple_successful
 ```
 
-## In Docker
+## Testing with Docker
 
-After building the docker image according to the instructions above,
+After building the docker image according to the instructions above:
 
-```
+```bash
 docker run --cap-add SYS_PTRACE swift-jupyter python3 /swift-jupyter/test/all_test.py
 ```

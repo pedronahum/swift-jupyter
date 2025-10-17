@@ -1,8 +1,60 @@
-.dockerignore
+# Git and version control
+.git/
+.gitignore
+.gitattributes
 
-.idea/
-.git**
+# Documentation (not needed in container)
+*.md
 screenshots/
-venv/
+docs/
 
-**/*.pyc
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+test/
+baseline_*.txt
+
+# Jupyter notebooks (use mounted volumes)
+.ipynb_checkpoints/
+*.ipynb
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Docker itself
+.dockerignore
+Dockerfile*
+docker-compose*.yml

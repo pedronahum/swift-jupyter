@@ -27,3 +27,113 @@ information on using pull requests.
 This project follows [Google's Open Source Community
 Guidelines](https://opensource.google.com/conduct/).
 
+## Development Setup
+
+### Prerequisites
+
+- Python 3.9-3.12 (Python 3.9+ required for Swift embedded compatibility)
+- Swift toolchain 5.7+ with LLDB Python 3 bindings
+- Git
+
+### Setting Up Development Environment
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/google/swift-jupyter.git
+   cd swift-jupyter
+   ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On macOS/Linux
+   # or
+   venv\Scripts\activate  # On Windows
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Register the kernel for development:
+   ```bash
+   python register.py --sys-prefix --swift-toolchain <path-to-swift-toolchain>
+   ```
+
+### Running Tests
+
+The project includes comprehensive test suites. See [TEST_README.md](TEST_README.md) for detailed testing instructions.
+
+Quick test commands:
+```bash
+# Run fast tests (kernel + simple notebook tests)
+python test/fast_test.py
+
+# Run all tests
+python test/all_test.py
+
+# Run specific test
+python test/fast_test.py SimpleNotebookTests.test_simple_successful
+
+# With verbose output
+python test/fast_test.py -v
+```
+
+### Code Style
+
+- **Python**: Follow PEP 8 guidelines
+  - Consider using `black` for automatic formatting
+  - Consider using `ruff` for linting
+
+- **Swift**: Follow Swift API Design Guidelines
+  - Use `swift-format` if available
+
+### Testing Your Changes
+
+Before submitting a PR:
+
+1. Run the test suite and ensure all tests pass
+2. Test the kernel manually:
+   ```bash
+   jupyter notebook  # or jupyter lab
+   # Create a new Swift notebook and test your changes
+   ```
+3. Verify the kernel can:
+   - Start successfully
+   - Execute simple Swift code
+   - Handle errors gracefully
+   - Be interrupted and shut down cleanly
+
+### Documentation
+
+When adding features or making changes:
+- Update README.md if user-facing changes
+- Update TEST_README.md if test-related changes
+- Add docstrings to Python code
+- Add comments to complex Swift code
+- Update compatibility matrix if dependencies change
+
+### Submitting Changes
+
+1. Create a new branch for your changes:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. Make your changes and commit:
+   ```bash
+   git add .
+   git commit -m "Brief description of changes"
+   ```
+
+3. Push to your fork and create a Pull Request
+
+4. Ensure CI tests pass (if configured)
+
+### Getting Help
+
+- Check existing issues and pull requests
+- Review [TEST_README.md](TEST_README.md) for testing guidance
+- Read the modernization plan in `modernization-plan.json` (if available)
+

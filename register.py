@@ -62,9 +62,32 @@ def make_kernel_env(args):
             kernel_env['SWIFT_BUILD_PATH'] = '%s/usr/bin/swift-build' % args.swift_toolchain
             kernel_env['SWIFT_PACKAGE_PATH'] = '%s/usr/bin/swift-package' % args.swift_toolchain
         elif platform.system() == 'Darwin':
-            kernel_env['PYTHONPATH'] = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/Python' % args.swift_toolchain
-            kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/macosx' % args.swift_toolchain
-            kernel_env['REPL_SWIFT_PATH'] = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/repl_swift' % args.swift_toolchain
+            # Try the standard location first (under /usr)
+            pythonpath_standard = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/Python' % args.swift_toolchain
+            # For dev snapshots, LLDB.framework is at the toolchain root
+            toolchain_root = os.path.dirname(args.swift_toolchain) if args.swift_toolchain.endswith('/usr') else args.swift_toolchain
+            pythonpath_dev = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/Python' % toolchain_root
+            
+            # Check which one exists
+            if os.path.isdir(pythonpath_standard + '/lldb'):
+                kernel_env['PYTHONPATH'] = pythonpath_standard
+                kernel_env['REPL_SWIFT_PATH'] = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/repl_swift' % args.swift_toolchain
+                lldb_framework_path = '%s/System/Library/PrivateFrameworks' % args.swift_toolchain
+            elif os.path.isdir(pythonpath_dev + '/lldb'):
+                kernel_env['PYTHONPATH'] = pythonpath_dev
+                kernel_env['REPL_SWIFT_PATH'] = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/repl_swift' % toolchain_root
+                lldb_framework_path = '%s/System/Library/PrivateFrameworks' % toolchain_root
+            else:
+                # Fallback to standard path and let validation catch it
+                kernel_env['PYTHONPATH'] = pythonpath_standard
+                kernel_env['REPL_SWIFT_PATH'] = '%s/System/Library/PrivateFrameworks/LLDB.framework/Resources/repl_swift' % args.swift_toolchain
+                lldb_framework_path = '%s/System/Library/PrivateFrameworks' % args.swift_toolchain
+            
+            # Set DYLD_FRAMEWORK_PATH so _lldb can find the LLDB framework
+            kernel_env['DYLD_FRAMEWORK_PATH'] = lldb_framework_path
+            
+            # Always use toolchain_root for LD_LIBRARY_PATH to avoid double /usr/usr
+            kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/macosx' % toolchain_root
         elif platform.system() == 'Windows':
             kernel_env['PYTHONPATH'] = os.path.join('%s','usr','lib','site-packages') % args.swift_toolchain
             kernel_env['LD_LIBRARY_PATH'] = os.path.join(os.path.dirname(os.path.dirname(args.swift_toolchain)),
@@ -129,15 +152,25 @@ def make_kernel_env(args):
 
 def validate_kernel_env(kernel_env):
     """Validates that the env vars refer to things that actually exist."""
-    # TODO: if not /lldb/_lldb.*
+    # Check for LLDB Python module
+    pythonpath = kernel_env['PYTHONPATH']
+    lldb_dir = os.path.join(pythonpath, 'lldb')
+    
     if platform.system() == 'Windows':
-        if not os.path.isfile(kernel_env['PYTHONPATH'] + '/lldb/_lldb.pyd'):
-            raise Exception('lldb python libs not found at %s' %
-                            kernel_env['PYTHONPATH'])
+        lldb_module = os.path.join(pythonpath, 'lldb', '_lldb.pyd')
+        if not os.path.isfile(lldb_module):
+            raise Exception('lldb python libs not found at %s' % pythonpath)
+    elif platform.system() == 'Darwin':
+        # On macOS, check if lldb module directory exists and contains __init__.py
+        if not os.path.isdir(lldb_dir):
+            raise Exception('lldb python module directory not found at %s' % lldb_dir)
+        # Check for __init__.py which indicates it's a valid Python module
+        if not os.path.isfile(os.path.join(lldb_dir, '__init__.py')):
+            raise Exception('lldb python module __init__.py not found at %s' % lldb_dir)
     else:
-        if not os.path.isfile(kernel_env['PYTHONPATH'] + '/lldb/_lldb.so'):
-            raise Exception('lldb python libs not found at %s' %
-                            kernel_env['PYTHONPATH'])
+        lldb_module = os.path.join(pythonpath, 'lldb', '_lldb.so')
+        if not os.path.isfile(lldb_module):
+            raise Exception('lldb python libs not found at %s' % pythonpath)
     if not os.path.isfile(kernel_env['REPL_SWIFT_PATH']):
         raise Exception('repl_swift binary not found at %s' %
                         kernel_env['REPL_SWIFT_PATH'])
