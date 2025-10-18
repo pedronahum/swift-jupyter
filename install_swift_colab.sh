@@ -339,10 +339,97 @@ if [ -d "$INSTALL_DIR" ]; then
 fi
 
 echo "Cloning swift-jupyter repository..."
-git clone -q https://github.com/google/swift-jupyter.git "$INSTALL_DIR"
+git clone -q https://github.com/pedronahum/swift-jupyter.git "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 echo "✅ Repository cloned to: $INSTALL_DIR"
+echo ""
+
+# Apply Swiftly LLDB support patch
+echo "🔧 Applying Swiftly LLDB compatibility patches..."
+python3 << 'PYTHON_PATCH'
+import os
+import sys
+
+register_py = '/content/swift-jupyter/register.py'
+
+# Check if file exists
+if not os.path.exists(register_py):
+    print(f'  ⚠️  {register_py} not found, skipping patches')
+    sys.exit(0)
+
+with open(register_py, 'r') as f:
+    lines = f.readlines()
+
+# Find linux_pythonpath function and check if already patched
+already_patched = any('System-installed lldb (for Swiftly' in line for line in lines)
+
+if already_patched:
+    print('  ℹ️  register.py already has Swiftly support, skipping')
+    sys.exit(0)
+
+# Find the function and replace it
+in_function = False
+function_start = -1
+function_end = -1
+
+for i, line in enumerate(lines):
+    if 'def linux_pythonpath(root):' in line:
+        in_function = True
+        function_start = i
+    elif in_function and line.strip() and not line.startswith(' ') and not line.startswith('\t'):
+        function_end = i
+        break
+
+if function_start == -1:
+    print('  ⚠️  Could not find linux_pythonpath function')
+    sys.exit(1)
+
+# Create the new function
+new_function = '''def linux_pythonpath(root):
+    """Find LLDB Python bindings path for Linux - with Swiftly support."""
+    import os
+    # Try toolchain locations first
+    version_specific = '%s/lib/python%d.%d/site-packages' % (root, sys.version_info[0], sys.version_info[1])
+    if os.path.isdir(version_specific) and os.path.isdir(os.path.join(version_specific, 'lldb')):
+        return version_specific
+
+    generic_dist = '%s/lib/python%s/dist-packages' % (root, sys.version_info[0])
+    if os.path.isdir(generic_dist) and os.path.isdir(os.path.join(generic_dist, 'lldb')):
+        return generic_dist
+
+    # System LLDB (for Swiftly toolchains)
+    print(f'  🔍 Toolchain LLDB not found, checking system locations...')
+    system_paths = [
+        '/usr/lib/python3/dist-packages',
+        '/usr/lib/python%d/dist-packages' % sys.version_info[0],
+        '/usr/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+    ]
+    # Add LLVM-versioned paths
+    for ver in range(11, 19):
+        system_paths.append('/usr/lib/llvm-%d/lib/python%d.%d/dist-packages' % (ver, sys.version_info[0], sys.version_info[1]))
+
+    for path in system_paths:
+        if os.path.isdir(path) and os.path.isdir(os.path.join(path, 'lldb')):
+            print(f'  ✅ Using system LLDB at {path}')
+            return path
+
+    print(f'  ❌ No LLDB found, falling back to {generic_dist}')
+    return generic_dist
+
+'''
+
+# Replace the function
+new_lines = lines[:function_start] + [new_function] + lines[function_end:]
+
+# Write back
+with open(register_py, 'w') as f:
+    f.writelines(new_lines)
+
+print('  ✅ Patched linux_pythonpath to support system LLDB')
+PYTHON_PATCH
+
+echo "✅ Patches applied"
 echo ""
 
 # Step 5: Register the kernel
