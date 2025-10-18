@@ -28,26 +28,26 @@ tar zxf swiftly-$(uname -m).tar.gz && \
 curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
 ```
 
-**After**:
+**After** (based on swift-colab approach):
 ```bash
 # Install Swiftly (official method from swift.org)
-curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
-tar zxf swiftly-$(uname -m).tar.gz && \
-./swiftly init --quiet-shell-followup
+ARCH=$(uname -m)
+curl -fsSL "https://download.swift.org/swiftly/linux/swiftly-${ARCH}.tar.gz" -o swiftly.tar.gz
+tar -xzf swiftly.tar.gz
+
+# Install swiftly to /usr/local/bin for system-wide access
+install -Dm755 ./swiftly /usr/local/bin/swiftly
 
 # Clean up
-rm -f swiftly-$(uname -m).tar.gz
-
-# Source swiftly environment
-if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
-    . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-fi
-
-# Update hash table
-hash -r
+rm -f swiftly.tar.gz swiftly
 ```
 
-### 2. Swift Installation ([install_swift_colab.sh:102](install_swift_colab.sh))
+**Key changes**:
+- Uses `install -Dm755` to place swiftly in `/usr/local/bin` (system-wide)
+- Removes the need to source environment files manually
+- More reliable than user-local installation in Colab
+
+### 2. Swiftly Initialization and Swift Installation ([install_swift_colab.sh:100-101](install_swift_colab.sh))
 
 **Before**:
 ```bash
@@ -56,10 +56,17 @@ swiftly install main-snapshot --no-modify-profile
 
 **After**:
 ```bash
-swiftly install main-snapshot
+# -y: auto-confirm prompts (non-interactive)
+# --quiet-shell-followup: don't print shell modification instructions
+# --use: set as the active toolchain
+swiftly init -y --quiet-shell-followup
+swiftly install --use main-snapshot
 ```
 
-(Removed `--no-modify-profile` as it's not needed with the new installation method)
+**Key changes**:
+- Added `-y` flag to auto-confirm prompts (fixes the "Proceed? (Y/n)" blocking issue)
+- Split into two commands: `init` then `install`
+- Added `--use` to automatically activate the installed toolchain
 
 ### 3. Environment Sourcing ([install_swift_colab.sh:108-118](install_swift_colab.sh))
 

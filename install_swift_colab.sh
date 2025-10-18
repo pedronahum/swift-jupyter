@@ -68,20 +68,15 @@ else
     echo "Installing Swiftly (Swift toolchain manager)..."
 
     # Install Swiftly (official method from swift.org)
-    curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
-    tar zxf swiftly-$(uname -m).tar.gz && \
-    ./swiftly init --quiet-shell-followup
+    ARCH=$(uname -m)
+    curl -fsSL "https://download.swift.org/swiftly/linux/swiftly-${ARCH}.tar.gz" -o swiftly.tar.gz
+    tar -xzf swiftly.tar.gz
+
+    # Install swiftly to /usr/local/bin for system-wide access
+    install -Dm755 ./swiftly /usr/local/bin/swiftly
 
     # Clean up
-    rm -f swiftly-$(uname -m).tar.gz
-
-    # Source swiftly environment
-    if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
-        . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-    fi
-
-    # Update hash table
-    hash -r
+    rm -f swiftly.tar.gz swiftly
 
     # Verify swiftly installation
     if ! command -v swiftly &> /dev/null; then
@@ -93,13 +88,17 @@ else
 fi
 
 echo ""
-echo "Installing Swift main-snapshot..."
+echo "Initializing Swiftly and installing Swift main-snapshot..."
 echo "This will download and install the latest Swift development snapshot."
 echo "This may take several minutes..."
 echo ""
 
-# Install Swift main snapshot using swiftly
-swiftly install main-snapshot
+# Initialize swiftly and install Swift main-snapshot
+# -y: auto-confirm prompts
+# --quiet-shell-followup: don't print shell modification instructions
+# --use: set as the active toolchain
+swiftly init -y --quiet-shell-followup
+swiftly install --use main-snapshot
 
 echo ""
 echo "✅ Swift installed successfully"
