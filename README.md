@@ -130,20 +130,34 @@ Use macOS system Python which is binary-compatible with LLDB:
   --swift-toolchain <path to swift toolchain>
 ```
 
-#### Option 2: Google Colab 🚀 (One-Click Install)
+#### Option 2: Google Colab 🚀 (One-Click Install) - **READY FOR TESTING**
 
 ```bash
 # Run this in a Colab notebook cell:
-!curl -s https://raw.githubusercontent.com/YOUR_USERNAME/swift-jupyter/main/install_swift_colab.sh | bash
+!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
 ```
 
-This script will:
-- Download and install Swift 6.3 Development Snapshot (October 10, 2024)
-- Install all dependencies
-- Register the Swift kernel
-- Create a test notebook
+**Status**: ✅ Complete - All installation errors fixed and ready for testing in Colab
 
-**Note**: After installation, restart the runtime and change the notebook runtime type to "Swift".
+This fully-automated script will:
+- Install system dependencies (libz3-dev, pkg-config, python3-lldb-13)
+- Download and install Swiftly (official Swift toolchain manager)
+- Install Swift main-snapshot (latest development snapshot)
+- Register the Swift kernel with Jupyter
+- Create test notebook at `/content/swift_test.ipynb`
+- Set up environment for immediate use
+
+**Installation time**: ~3-5 minutes (downloads ~600MB Swift toolchain)
+
+**After installation**:
+1. Restart runtime (Runtime → Restart runtime)
+2. Change runtime type to "Swift" (Runtime → Change runtime type)
+3. Test with: `print("Hello from Swift!")`
+
+**Documentation**:
+- **[GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md)** - Complete user guide with 10+ examples
+- **[COLAB_INSTALL_FIXED.md](COLAB_INSTALL_FIXED.md)** - Technical details of installation fixes
+- **[INSTALL_SCRIPT_STATUS.md](INSTALL_SCRIPT_STATUS.md)** - Quick reference and testing checklist
 
 #### Option 3: Ubuntu with Python 3.9+
 

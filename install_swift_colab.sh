@@ -55,9 +55,30 @@ if [ "$(uname -m)" != "x86_64" ]; then
     exit 1
 fi
 
-# Step 1: Install Swiftly and Swift
+# Step 1: Install required system dependencies FIRST
 echo "=============================================="
-echo "Step 1: Installing Swiftly & Swift"
+echo "Step 1: Installing System Dependencies"
+echo "=============================================="
+echo ""
+
+echo "Installing required packages (needed before Swift installation)..."
+apt-get update -qq
+apt-get install -y -qq \
+    libpython3-dev \
+    libncurses5-dev \
+    libncurses5 \
+    libtinfo5 \
+    libz3-dev \
+    pkg-config \
+    python3-lldb-13 \
+    > /dev/null 2>&1
+
+echo "✅ System dependencies installed"
+echo ""
+
+# Step 2: Install Swiftly and Swift
+echo "=============================================="
+echo "Step 2: Installing Swiftly & Swift"
 echo "=============================================="
 echo ""
 
@@ -137,27 +158,6 @@ fi
 
 SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
 echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
-echo ""
-
-# Step 2: Install required system dependencies
-echo "=============================================="
-echo "Step 2: Installing System Dependencies"
-echo "=============================================="
-echo ""
-
-echo "Installing required packages..."
-apt-get update -qq
-apt-get install -y -qq \
-    libpython3-dev \
-    libncurses5-dev \
-    libncurses5 \
-    libtinfo5 \
-    libz3-dev \
-    pkg-config \
-    python3-lldb-13 \
-    > /dev/null 2>&1
-
-echo "✅ System dependencies installed"
 echo ""
 
 # Step 3: Install Python dependencies

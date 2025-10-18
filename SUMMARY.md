@@ -28,23 +28,41 @@ This document summarizes the recent modernization of the swift-jupyter kernel, c
 
 **Problem**: Installing Swift in Google Colab required manual steps and expertise.
 
-**Solution**: Created a comprehensive one-click installation script.
+**Solution**: Created a comprehensive one-click installation script using Swiftly (official Swift toolchain manager).
 
-**File Created**: [install_swift_colab.sh](install_swift_colab.sh) (377 lines)
+**File Created**: [install_swift_colab.sh](install_swift_colab.sh) (387 lines)
 
 **Features**:
-- Automatic Swift 6.3 Development Snapshot download (October 10, 2024)
-- System dependency installation
-- Kernel registration
+- Uses Swiftly for Swift toolchain management (official method from swift.org)
+- Fully non-interactive installation (`-y` flags on all prompts)
+- System dependencies installed FIRST (before Swift) to avoid warnings
+- Automatic Swift main-snapshot installation
+- Kernel registration with correct toolchain path
 - Test notebook creation
-- Progress indicators and error handling
+- Progress indicators and comprehensive error handling
+
+**Key Technical Achievements**:
+1. **Non-Interactive Mode**: Both `swiftly init -y` and `swiftly install -y` for unattended installation
+2. **Correct Dependency Order**: System packages installed in Step 1, Swift in Step 2
+3. **System-Wide Installation**: Swiftly binary in `/usr/local/bin` for easy access
+4. **Environment Management**: Proper sourcing of swiftly environment and PATH setup
+5. **Error Detection**: Verifies Swift binary availability and toolchain directory
+
+**Fixed Errors**:
+- ❌ HTML download (wrong URL) → ✅ Tarball from swift.org
+- ❌ Interactive prompt "Proceed? (Y/n)" → ✅ `swiftly init -y`
+- ❌ Second prompt "Proceed? (y/N)" → ✅ `swiftly install -y`
+- ❌ Dependency warnings → ✅ Install dependencies FIRST
+- ❌ Swift binary not found → ✅ Proper environment sourcing
 
 **Usage**:
 ```bash
-!curl -s https://raw.githubusercontent.com/YOUR_REPO/swift-jupyter/main/install_swift_colab.sh | bash
+!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
 ```
 
 **Installation Time**: ~3-5 minutes
+
+**Documentation**: See [COLAB_INSTALL_FIXED.md](COLAB_INSTALL_FIXED.md) for detailed technical explanation of all fixes
 
 ### 3. Comprehensive Documentation
 

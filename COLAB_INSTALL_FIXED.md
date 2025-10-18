@@ -21,7 +21,28 @@ tar zxf swiftly-$(uname -m).tar.gz && \
 
 ## Changes Made
 
-### 1. Swiftly Installation ([install_swift_colab.sh:70-93](install_swift_colab.sh))
+### 0. **CRITICAL FIX**: Reordered Installation Steps
+
+**The Most Important Fix**: System dependencies MUST be installed BEFORE Swift installation.
+
+**Before**:
+- Step 1: Installing Swiftly & Swift
+- Step 2: Installing System Dependencies
+
+**After**:
+- Step 1: Installing System Dependencies ← **Moved to first**
+- Step 2: Installing Swiftly & Swift
+
+**Why this matters**: When `swiftly install` runs, it checks for required dependencies. If they're not present, it shows a warning and requires the user to install them. By installing dependencies FIRST, the installation completes cleanly without warnings.
+
+**Error that this fixes**:
+```
+Error: There are some dependencies that should be installed before using this toolchain.
+You can run the following script as the system administrator (e.g. root) to prepare your system:
+apt-get -y install libz3-dev pkg-config python3-lldb-13
+```
+
+### 1. Swiftly Installation ([install_swift_colab.sh:85-108](install_swift_colab.sh))
 
 **Before**:
 ```bash
@@ -47,7 +68,7 @@ rm -f swiftly.tar.gz swiftly
 - Removes the need to source environment files manually
 - More reliable than user-local installation in Colab
 
-### 2. Swiftly Initialization and Swift Installation ([install_swift_colab.sh:100-101](install_swift_colab.sh))
+### 2. Swiftly Initialization and Swift Installation ([install_swift_colab.sh:121-122](install_swift_colab.sh))
 
 **Before**:
 ```bash
@@ -71,7 +92,7 @@ swiftly install -y --use main-snapshot
 - Split into two commands: `init` then `install`
 - Added `--use` to automatically activate the installed toolchain
 
-### 3. Environment Sourcing ([install_swift_colab.sh:108-118](install_swift_colab.sh))
+### 3. Environment Sourcing ([install_swift_colab.sh:129-139](install_swift_colab.sh))
 
 After installing Swift, we must source the swiftly environment:
 
@@ -89,7 +110,7 @@ fi
 hash -r
 ```
 
-### 4. Toolchain Directory Detection ([install_swift_colab.sh:133-140](install_swift_colab.sh))
+### 4. Toolchain Directory Detection ([install_swift_colab.sh:152-161](install_swift_colab.sh))
 
 **Before**:
 ```bash
@@ -108,7 +129,9 @@ fi
 SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
 ```
 
-### 5. System Dependencies ([install_swift_colab.sh:151-159](install_swift_colab.sh))
+### 5. System Dependencies - **NOW STEP 1** ([install_swift_colab.sh:58-77](install_swift_colab.sh))
+
+**CRITICAL**: These are now installed in Step 1, BEFORE Swift installation.
 
 Added Swift-recommended dependencies:
 
@@ -123,7 +146,7 @@ apt-get install -y -qq \
     python3-lldb-13
 ```
 
-### 6. Environment Initialization ([install_swift_colab.sh:220-227](install_swift_colab.sh))
+### 6. Environment Initialization ([install_swift_colab.sh:226-249](install_swift_colab.sh))
 
 Simplified the Python initialization script to directly source swiftly's environment file:
 
@@ -137,7 +160,7 @@ if os.path.exists(swiftly_env):
         os.environ['PATH'] = result.stdout.strip() + ':' + os.environ.get('PATH', '')
 ```
 
-### 7. Error Handling ([install_swift_colab.sh:120-125](install_swift_colab.sh))
+### 7. Error Handling ([install_swift_colab.sh:141-146](install_swift_colab.sh))
 
 Added better error handling:
 
