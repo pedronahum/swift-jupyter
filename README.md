@@ -33,11 +33,6 @@ This kernel has been modernized and is now working with:
 - Modern SwiftPM Package Description 5.5+
 - Cross-platform dlopen support (Darwin/Glibc)
 
-✅ **Google Colab Integration** 🚀
-- One-click installation script
-- Swift 6.3 dev snapshot auto-download
-- Pre-configured test notebooks
-- See [GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md)
 
 ✅ **Testing Infrastructure**
 - Modern pytest-based test suite
@@ -47,7 +42,7 @@ This kernel has been modernized and is now working with:
 
 ✅ **Documentation**
 - Updated installation instructions
-- Comprehensive testing guide ([HOW_TO_TEST.md](HOW_TO_TEST.md))
+- Comprehensive testing guide ([docs/HOW_TO_TEST.md](docs/HOW_TO_TEST.md))
 - Clear compatibility matrix
 - Troubleshooting documentation
 
@@ -63,7 +58,7 @@ This kernel has been modernized and is now working with:
 | **JupyterLab** | 4.x | ✅ Tested | Full support |
 | **Notebook** | 7.x | ✅ Tested | Classic notebook v7+ |
 | **macOS** | 12+ | ✅ Tested | Apple Silicon & Intel |
-| **Google Colab** | Ubuntu 22.04 | ✅ Supported | [See guide](GOOGLE_COLAB_GUIDE.md) |
+| **Linux** | Ubuntu 22.04+ | ✅ Supported | With LLDB Python bindings |
 
 ### Supported Features
 
@@ -71,14 +66,12 @@ This kernel has been modernized and is now working with:
 |---------|--------|---------------|
 | **Core Swift 6.3** | ✅ Full Support | All Swift features work |
 | **SwiftPM Packages** | ✅ Full Support | Use `%install` directive |
-| **PythonKit** | ✅ Full Support | [PYTHONKIT_SETUP.md](PYTHONKIT_SETUP.md) |
-| **matplotlib/numpy/pandas** | ✅ Via PythonKit | [MATPLOTLIB_STATUS.md](MATPLOTLIB_STATUS.md) |
-| **Google Colab** | ✅ One-Click Install | [GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md) |
+| **PythonKit** | ✅ Full Support | [docs/PYTHONKIT_SETUP.md](docs/PYTHONKIT_SETUP.md) |
+| **matplotlib/numpy/pandas** | ✅ Via PythonKit | [docs/MATPLOTLIB_STATUS.md](docs/MATPLOTLIB_STATUS.md) |
 | **SwiftPlot** | ✅ Native Plotting | Pure Swift alternative to matplotlib |
 | **Code Completion** | ⚠️ Limited | Under investigation |
 | **Interrupts** | ⚠️ Timing Issues | Works but may have delays |
 | **Swift for TensorFlow** | ❌ Not Supported | Project archived (2021) |
-| **Automatic Differentiation** | ❌ Requires S4TF | Use JAX via PythonKit instead |
 
 ## Installation
 
@@ -130,58 +123,7 @@ Use macOS system Python which is binary-compatible with LLDB:
   --swift-toolchain <path to swift toolchain>
 ```
 
-#### Option 2: Google Colab 🚀 (Two Approaches)
-
-**⭐ Recommended: Cell Magic Approach**
-
-Use `%%swift` magic in Python notebooks (simpler, more reliable):
-
-```bash
-# Installation:
-!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab_magic.sh | bash
-
-# Activation (run once per session):
-%run /content/setup_swift_magic.py
-
-# Usage (in any cell):
-%%swift
-print("Hello from Swift!")
-```
-
-**Advantages**:
-- ✅ Simpler setup (no kernel registration)
-- ✅ Mix Python and Swift in same notebook
-- ✅ More reliable (explicit environment)
-- ✅ Better error messages
-
-**Alternative: Full Kernel Approach**
-
-Register Swift as a complete Jupyter kernel:
-
-```bash
-# Installation:
-!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
-
-# After installation:
-# 1. Runtime → Restart runtime
-# 2. Runtime → Change runtime type → Swift
-# 3. All cells run Swift directly (no %%swift needed)
-```
-
-**Advantages**:
-- ✅ Pure Swift notebooks
-- ✅ Traditional Jupyter kernel experience
-- ✅ Runtime switching
-
-**Installation time**: ~3-5 minutes for both approaches
-
-**Documentation**:
-- **[COLAB_INSTALLATION_GUIDE.md](COLAB_INSTALLATION_GUIDE.md)** - ⭐ Complete comparison and guide
-- **[GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md)** - Examples and tutorials
-- **[install_swift_colab_magic.sh](install_swift_colab_magic.sh)** - Cell magic installer (recommended)
-- **[install_swift_colab.sh](install_swift_colab.sh)** - Full kernel installer
-
-#### Option 3: Ubuntu with Python 3.9+
+#### Option 2: Ubuntu/Linux with Python 3.9+
 
 ```bash
 # Install dependencies
@@ -562,9 +504,18 @@ Apache License 2.0 - See LICENSE file for details.
 - **Jupyter**: https://jupyter.org - Jupyter notebook ecosystem
 - **Swift for TensorFlow** (archived): https://github.com/tensorflow/swift
 
+## Documentation
+
+Detailed documentation is available in the [docs/](docs/) folder:
+
+- **[docs/HOW_TO_TEST.md](docs/HOW_TO_TEST.md)** - Testing guide and test suite documentation
+- **[docs/PYTHONKIT_SETUP.md](docs/PYTHONKIT_SETUP.md)** - Using PythonKit for Python interop
+- **[docs/MATPLOTLIB_STATUS.md](docs/MATPLOTLIB_STATUS.md)** - matplotlib/numpy/pandas integration
+- **[docs/SUMMARY.md](docs/SUMMARY.md)** - Comprehensive modernization summary
+- **[docs/NEXT_STEPS.md](docs/NEXT_STEPS.md)** - Development roadmap
+
 ## Support
 
 For issues, questions, or contributions:
 - Open an issue on GitHub
-- See [HOW_TO_TEST.md](HOW_TO_TEST.md) for testing help
-- See [NEXT_STEPS.md](NEXT_STEPS.md) for development roadmap
+- See documentation in [docs/](docs/) folder
