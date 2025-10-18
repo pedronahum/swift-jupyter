@@ -4,13 +4,17 @@
 
 The Google Colab installation script has been fully fixed, including support for Swiftly toolchains that use system-installed LLDB.
 
-### Latest Fix (Oct 18, 2024)
+### Latest Fixes (Oct 18, 2024)
 
-**Problem**: Registration failed because Swiftly toolchains use system-installed LLDB Python bindings instead of bundling them.
+**Fix 1 - System LLDB Support**:
+- **Problem**: Registration failed because Swiftly toolchains use system-installed LLDB Python bindings instead of bundling them.
+- **Solution**: Enhanced `register.py` to detect and use system LLDB from `python3-lldb-13` package.
+- **Details**: [REGISTER_PY_SWIFTLY_SUPPORT.md](REGISTER_PY_SWIFTLY_SUPPORT.md)
 
-**Solution**: Enhanced `register.py` to detect and use system LLDB from `python3-lldb-13` package.
-
-See [REGISTER_PY_SWIFTLY_SUPPORT.md](REGISTER_PY_SWIFTLY_SUPPORT.md) for technical details.
+**Fix 2 - Toolchain Detection**:
+- **Problem**: Script detected toolchain as `/root/.local/share` instead of `/root/.local/share/swiftly/toolchains/<version>`.
+- **Solution**: Added symlink resolution and fallback to direct Swiftly directory search.
+- **Details**: [TOOLCHAIN_DETECTION_FIX.md](TOOLCHAIN_DETECTION_FIX.md)
 
 ## Quick Reference
 

@@ -150,19 +150,69 @@ echo ""
 
 # Get Swift installation directory for kernel registration
 # Swiftly uses $HOME/.local/share/swiftly/toolchains/...
+
+# Use swiftly to get the actual toolchain in use
+echo "Detecting Swift toolchain location..."
+SWIFTLY_TOOLCHAIN_INFO=$(swiftly use)
+echo "Current toolchain: $SWIFTLY_TOOLCHAIN_INFO"
+
+# Get the real path of swift binary (resolving symlinks)
 SWIFT_BIN=$(which swift)
 if [ -z "$SWIFT_BIN" ]; then
     echo "❌ Error: Could not find swift binary"
     exit 1
 fi
 
-# The swift binary is at: ~/.local/share/swiftly/toolchains/<version>/usr/bin/swift
+# Resolve symlinks to get the actual toolchain location
+SWIFT_BIN_REAL=$(readlink -f "$SWIFT_BIN" 2>/dev/null || realpath "$SWIFT_BIN" 2>/dev/null || echo "$SWIFT_BIN")
+echo "Swift binary (resolved): $SWIFT_BIN_REAL"
+
+# The real swift binary is at: ~/.local/share/swiftly/toolchains/<version>/usr/bin/swift
 # We need to get the toolchain root (one level up from usr)
-SWIFT_USR_BIN=$(dirname "$SWIFT_BIN")  # .../usr/bin
+SWIFT_USR_BIN=$(dirname "$SWIFT_BIN_REAL")  # .../usr/bin
 SWIFT_USR=$(dirname "$SWIFT_USR_BIN")  # .../usr
 SWIFT_TOOLCHAIN_DIR=$(dirname "$SWIFT_USR")  # .../<version>
 
-echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
+echo "Swift toolchain directory (from binary path): $SWIFT_TOOLCHAIN_DIR"
+
+# Verify this looks correct - should contain "toolchains"
+if [[ ! "$SWIFT_TOOLCHAIN_DIR" == *"toolchains"* ]]; then
+    echo "⚠️  Toolchain path doesn't contain 'toolchains', trying alternative method..."
+
+    # Alternative: Use Swiftly's home directory structure
+    # Swiftly toolchains are always at: $HOME/.local/share/swiftly/toolchains/<version>
+    SWIFTLY_TOOLCHAINS_DIR="$HOME/.local/share/swiftly/toolchains"
+
+    if [ -d "$SWIFTLY_TOOLCHAINS_DIR" ]; then
+        # Find the most recently modified toolchain (should be the one we just installed)
+        SWIFT_TOOLCHAIN_DIR=$(ls -dt "$SWIFTLY_TOOLCHAINS_DIR"/* 2>/dev/null | head -1)
+        echo "Found toolchain via Swiftly directory: $SWIFT_TOOLCHAIN_DIR"
+    fi
+fi
+
+echo "Final Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
+
+# Verify the toolchain directory exists and contains usr
+if [ ! -d "$SWIFT_TOOLCHAIN_DIR/usr" ]; then
+    echo "❌ Error: Toolchain directory doesn't contain 'usr' subdirectory"
+    echo "   Expected structure: $SWIFT_TOOLCHAIN_DIR/usr/bin/swift"
+    echo ""
+    echo "Diagnostic information:"
+    echo "  SWIFT_BIN: $SWIFT_BIN"
+    echo "  SWIFT_BIN_REAL: $SWIFT_BIN_REAL"
+    echo "  SWIFT_USR_BIN: $SWIFT_USR_BIN"
+    echo "  SWIFT_USR: $SWIFT_USR"
+    echo "  SWIFT_TOOLCHAIN_DIR: $SWIFT_TOOLCHAIN_DIR"
+    echo ""
+    echo "Directory contents of $SWIFT_TOOLCHAIN_DIR:"
+    ls -la "$SWIFT_TOOLCHAIN_DIR" 2>/dev/null || echo "   Directory doesn't exist"
+    echo ""
+    echo "Available toolchains in ~/.local/share/swiftly/toolchains:"
+    ls -la "$HOME/.local/share/swiftly/toolchains" 2>/dev/null || echo "   Directory doesn't exist"
+    exit 1
+fi
+
+echo "✅ Toolchain directory verified: $SWIFT_TOOLCHAIN_DIR/usr"
 
 # Verify LLDB Python bindings exist
 # Check common locations for LLDB Python bindings
