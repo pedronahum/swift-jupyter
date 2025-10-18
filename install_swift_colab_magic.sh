@@ -97,19 +97,78 @@ echo ""
 
 # Verify LLDB installation
 echo "🔍 Verifying LLDB installation..."
+
+# Try to import lldb directly first
 PY_LLDB_DIR=$(python3 -c 'import lldb, os; print(os.path.dirname(lldb.__file__))' 2>/dev/null || echo "")
 
 if [ -z "$PY_LLDB_DIR" ]; then
-    echo "❌ Error: Could not import 'lldb' module after installation"
-    echo "   This is unexpected. The $LLDB_PACKAGE installation may have failed."
-    exit 1
+    # LLDB not in default path, search for it manually
+    echo "   LLDB not in default Python path, searching..."
+
+    PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
+
+    # Search for LLDB in common locations
+    LLDB_SEARCH_PATHS=(
+        "/usr/lib/python3/dist-packages"
+        "/usr/lib/python${PYTHON_VERSION}/dist-packages"
+        "/usr/lib/llvm-14/lib/python${PYTHON_VERSION}/dist-packages"
+        "/usr/lib/llvm-15/lib/python${PYTHON_VERSION}/dist-packages"
+        "/usr/lib/llvm-16/lib/python${PYTHON_VERSION}/dist-packages"
+        "/usr/lib/llvm-17/lib/python${PYTHON_VERSION}/dist-packages"
+        "/usr/lib/llvm-18/lib/python${PYTHON_VERSION}/dist-packages"
+    )
+
+    for search_path in "${LLDB_SEARCH_PATHS[@]}"; do
+        if [ -d "$search_path/lldb" ]; then
+            PY_LLDB_DIR="$search_path"
+            echo "   ✅ Found LLDB at: $PY_LLDB_DIR"
+            break
+        fi
+    done
+
+    if [ -z "$PY_LLDB_DIR" ]; then
+        echo "❌ Error: Could not find LLDB Python module after installation"
+        echo "   Searched paths:"
+        for search_path in "${LLDB_SEARCH_PATHS[@]}"; do
+            echo "   - $search_path"
+        done
+        exit 1
+    fi
 fi
 
 # Find the system LLDB library path
+# For /usr/lib/llvm-14/lib/python3.12/dist-packages -> /usr/lib/llvm-14/lib
 SYSTEM_LLDB_LIB_PATH=$(dirname $(dirname "$PY_LLDB_DIR"))
+
+# Verify it looks correct
+if [[ "$SYSTEM_LLDB_LIB_PATH" == *"llvm"* ]]; then
+    # For LLVM-versioned installs, use the lib directory
+    true
+elif [ -d "/usr/lib/x86_64-linux-gnu" ]; then
+    # Fallback to system lib directory
+    SYSTEM_LLDB_LIB_PATH="/usr/lib/x86_64-linux-gnu"
+fi
 
 echo "✅ LLDB Python module: $PY_LLDB_DIR"
 echo "✅ LLDB library path: $SYSTEM_LLDB_LIB_PATH"
+
+# Verify we can actually import lldb with the found path
+python3 << EOF
+import sys
+sys.path.insert(0, "$PY_LLDB_DIR")
+try:
+    import lldb
+    print("✅ LLDB module loads successfully")
+except ImportError as e:
+    print(f"❌ Error: Cannot import LLDB even from {PY_LLDB_DIR}: {e}")
+    sys.exit(1)
+EOF
+
+if [ $? -ne 0 ]; then
+    echo "❌ LLDB verification failed"
+    exit 1
+fi
+
 echo ""
 
 # ---
