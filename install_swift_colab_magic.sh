@@ -89,6 +89,7 @@ apt-get install -y -qq \
     libncurses5-dev \
     libncurses5 \
     libtinfo5 \
+    libz3-dev \
     pkg-config \
     $LLDB_PACKAGE
 
