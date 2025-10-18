@@ -56,15 +56,18 @@ swiftly install main-snapshot --no-modify-profile
 
 **After**:
 ```bash
-# -y: auto-confirm prompts (non-interactive)
+# -y: auto-confirm all prompts (both init and install - non-interactive)
 # --quiet-shell-followup: don't print shell modification instructions
 # --use: set as the active toolchain
 swiftly init -y --quiet-shell-followup
-swiftly install --use main-snapshot
+swiftly install -y --use main-snapshot
 ```
 
 **Key changes**:
-- Added `-y` flag to auto-confirm prompts (fixes the "Proceed? (Y/n)" blocking issue)
+- Added `-y` flag to BOTH `init` and `install` commands
+- Fixes TWO blocking prompts:
+  1. `swiftly init` asks "Proceed? (Y/n):"
+  2. `swiftly install` asks "Proceed? (y/N):" when overwriting files
 - Split into two commands: `init` then `install`
 - Added `--use` to automatically activate the installed toolchain
 

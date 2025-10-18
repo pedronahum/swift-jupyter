@@ -94,11 +94,11 @@ echo "This may take several minutes..."
 echo ""
 
 # Initialize swiftly and install Swift main-snapshot
-# -y: auto-confirm prompts
+# -y: auto-confirm all prompts (both init and install)
 # --quiet-shell-followup: don't print shell modification instructions
 # --use: set as the active toolchain
 swiftly init -y --quiet-shell-followup
-swiftly install --use main-snapshot
+swiftly install -y --use main-snapshot
 
 echo ""
 echo "✅ Swift installed successfully"
