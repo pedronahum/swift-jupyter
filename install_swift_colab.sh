@@ -359,36 +359,27 @@ if not os.path.exists(register_py):
     sys.exit(0)
 
 with open(register_py, 'r') as f:
-    lines = f.readlines()
+    content = f.read()
 
-# Find linux_pythonpath function and check if already patched
-already_patched = any('System-installed lldb (for Swiftly' in line for line in lines)
-
-if already_patched:
+# Check if already patched
+if 'Swiftly LLDB support' in content:
     print('  ℹ️  register.py already has Swiftly support, skipping')
     sys.exit(0)
 
-# Find the function and replace it
-in_function = False
-function_start = -1
-function_end = -1
+patches_applied = 0
 
-for i, line in enumerate(lines):
-    if 'def linux_pythonpath(root):' in line:
-        in_function = True
-        function_start = i
-    elif in_function and line.strip() and not line.startswith(' ') and not line.startswith('\t'):
-        function_end = i
-        break
+# ===== PATCH 1: linux_pythonpath function =====
+old_linux_pythonpath = '''def linux_pythonpath(root):
+    old_dir = '%s/lib/python%d.%d/site-packages' % (root,
+                                                    sys.version_info[0],
+                                                    sys.version_info[1])
+    if os.path.isdir(old_dir):
+        return old_dir
 
-if function_start == -1:
-    print('  ⚠️  Could not find linux_pythonpath function')
-    sys.exit(1)
+    return '%s/lib/python%s/dist-packages' % (root, sys.version_info[0])'''
 
-# Create the new function
-new_function = '''def linux_pythonpath(root):
-    """Find LLDB Python bindings path for Linux - with Swiftly support."""
-    import os
+new_linux_pythonpath = '''def linux_pythonpath(root):
+    """Find LLDB Python bindings path for Linux - Swiftly LLDB support."""
     # Try toolchain locations first
     version_specific = '%s/lib/python%d.%d/site-packages' % (root, sys.version_info[0], sys.version_info[1])
     if os.path.isdir(version_specific) and os.path.isdir(os.path.join(version_specific, 'lldb')):
@@ -415,18 +406,49 @@ new_function = '''def linux_pythonpath(root):
             return path
 
     print(f'  ❌ No LLDB found, falling back to {generic_dist}')
-    return generic_dist
+    return generic_dist'''
 
-'''
+if old_linux_pythonpath in content:
+    content = content.replace(old_linux_pythonpath, new_linux_pythonpath)
+    patches_applied += 1
+    print('  ✅ Patched linux_pythonpath function')
+else:
+    print('  ⚠️  linux_pythonpath function not found or already patched')
 
-# Replace the function
-new_lines = lines[:function_start] + [new_function] + lines[function_end:]
+# ===== PATCH 2: validate_kernel_env - Remove strict PYTHONPATH check =====
+# The original code raises an exception if PYTHONPATH dir doesn't exist
+# We need to make it more lenient for Swiftly toolchains
+old_validation = '''    if not os.path.isdir(kernel_env['PYTHONPATH']):
+        raise Exception('lldb python libs not found at %s' %
+                        kernel_env['PYTHONPATH'])'''
+
+new_validation = '''    # Check PYTHONPATH (allow system LLDB for Swiftly toolchains)
+    pythonpath = kernel_env['PYTHONPATH']
+    if not os.path.isdir(pythonpath):
+        # For Swiftly toolchains, PYTHONPATH might point to system LLDB
+        # which was already validated by linux_pythonpath()
+        print(f'  ℹ️  PYTHONPATH {pythonpath} not found')
+        print(f'  ℹ️  Assuming system LLDB (from linux_pythonpath)')
+        # Don't raise exception - let LLDB validation below handle it
+    lldb_dir = os.path.join(pythonpath, 'lldb')
+    if not os.path.isdir(lldb_dir):
+        raise Exception('lldb python libs not found at %s' % pythonpath)'''
+
+if old_validation in content:
+    content = content.replace(old_validation, new_validation)
+    patches_applied += 1
+    print('  ✅ Patched validate_kernel_env to allow system LLDB')
+else:
+    print('  ⚠️  validate_kernel_env check not found or already patched')
 
 # Write back
 with open(register_py, 'w') as f:
-    f.writelines(new_lines)
+    f.write(content)
 
-print('  ✅ Patched linux_pythonpath to support system LLDB')
+if patches_applied > 0:
+    print(f'  ✅ Applied {patches_applied} patch(es) for Swiftly LLDB support')
+else:
+    print('  ⚠️  No patches applied - file may already be patched or format changed')
 PYTHON_PATCH
 
 echo "✅ Patches applied"
