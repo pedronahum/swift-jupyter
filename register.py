@@ -39,13 +39,42 @@ def get_kernel_code_name(kernel_name):
 
 
 def linux_pythonpath(root):
-    old_dir = '%s/lib/python%d.%d/site-packages' % (root,
-                                                    sys.version_info[0],
-                                                    sys.version_info[1])
-    if os.path.isdir(old_dir):
-        return old_dir
+    """Find LLDB Python bindings path for Linux.
 
-    return '%s/lib/python%s/dist-packages' % (root, sys.version_info[0])
+    Tries multiple locations in priority order:
+    1. Version-specific site-packages (e.g., python3.10/site-packages)
+    2. Generic python3/dist-packages
+    3. System-installed lldb (for Swiftly installations)
+    """
+    # Try version-specific site-packages first
+    version_specific = '%s/lib/python%d.%d/site-packages' % (root,
+                                                              sys.version_info[0],
+                                                              sys.version_info[1])
+    if os.path.isdir(version_specific) and os.path.isdir(os.path.join(version_specific, 'lldb')):
+        return version_specific
+
+    # Try generic python3 dist-packages
+    generic_dist = '%s/lib/python%s/dist-packages' % (root, sys.version_info[0])
+    if os.path.isdir(generic_dist) and os.path.isdir(os.path.join(generic_dist, 'lldb')):
+        return generic_dist
+
+    # For Swiftly toolchains, check if lldb is installed system-wide
+    # This happens when using python3-lldb package
+    system_lldb_paths = [
+        '/usr/lib/python3/dist-packages',
+        '/usr/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-13/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-14/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-15/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+    ]
+
+    for sys_path in system_lldb_paths:
+        if os.path.isdir(sys_path) and os.path.isdir(os.path.join(sys_path, 'lldb')):
+            print(f'  ℹ️  Using system LLDB Python bindings at {sys_path}')
+            return sys_path
+
+    # Fallback to generic dist-packages (let validation catch if it doesn't exist)
+    return generic_dist
 
 
 def make_kernel_env(args):
@@ -56,9 +85,30 @@ def make_kernel_env(args):
     if args.swift_toolchain is not None:
         # Use a prebuilt Swift toolchain.
         if platform.system() == 'Linux':
+            # Find LLDB Python bindings (might be in toolchain or system-wide)
             kernel_env['PYTHONPATH'] = linux_pythonpath(args.swift_toolchain + '/usr')
+
             kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/linux' % args.swift_toolchain
-            kernel_env['REPL_SWIFT_PATH'] = '%s/usr/bin/repl_swift' % args.swift_toolchain
+
+            # Try to find repl_swift in multiple locations
+            # 1. In toolchain usr/bin
+            # 2. In toolchain libexec
+            # 3. System-wide (for Swiftly with system LLDB)
+            repl_swift_candidates = [
+                '%s/usr/bin/repl_swift' % args.swift_toolchain,
+                '%s/usr/libexec/swift/linux/repl_swift' % args.swift_toolchain,
+                '%s/libexec/swift/linux/repl_swift' % args.swift_toolchain,
+            ]
+
+            repl_swift_path = None
+            for candidate in repl_swift_candidates:
+                if os.path.isfile(candidate):
+                    repl_swift_path = candidate
+                    break
+
+            # If not found in toolchain, will try system locations in validation
+            kernel_env['REPL_SWIFT_PATH'] = repl_swift_path if repl_swift_path else '%s/usr/bin/repl_swift' % args.swift_toolchain
+
             kernel_env['SWIFT_BUILD_PATH'] = '%s/usr/bin/swift-build' % args.swift_toolchain
             kernel_env['SWIFT_PACKAGE_PATH'] = '%s/usr/bin/swift-package' % args.swift_toolchain
         elif platform.system() == 'Darwin':
@@ -188,14 +238,51 @@ def validate_kernel_env(kernel_env, validate_only=False):
         if validate_only:
             print(f'  ✅ LLDB Python module found at {lldb_dir}')
     else:
+        # On Linux, check if lldb module directory exists and contains _lldb.so
+        if not os.path.isdir(lldb_dir):
+            raise Exception('lldb python module directory not found at %s' % lldb_dir)
+
         lldb_module = os.path.join(pythonpath, 'lldb', '_lldb.so')
         if not os.path.isfile(lldb_module):
-            raise Exception('lldb python libs not found at %s' % pythonpath)
+            # For system LLDB installations, the .so might be named differently
+            lldb_module_cpython = os.path.join(pythonpath, 'lldb', '_lldb.cpython-*.so')
+            from glob import glob
+            cpython_modules = glob(lldb_module_cpython)
+            if not cpython_modules:
+                raise Exception('lldb python libs not found at %s (checked _lldb.so and _lldb.cpython-*.so)' % pythonpath)
+            else:
+                if validate_only:
+                    print(f'  ✅ LLDB Python module found at {pythonpath}')
+        else:
+            if validate_only:
+                print(f'  ✅ LLDB Python module found at {pythonpath}')
+
+    # Check for repl_swift
     if not os.path.isfile(kernel_env['REPL_SWIFT_PATH']):
-        raise Exception('repl_swift binary not found at %s' %
-                        kernel_env['REPL_SWIFT_PATH'])
-    if validate_only:
-        print(f'  ✅ repl_swift binary found at {kernel_env["REPL_SWIFT_PATH"]}')
+        # For Swiftly toolchains, try system-installed repl_swift
+        system_repl_swift_paths = [
+            '/usr/lib/llvm-13/lib/python%d.%d/dist-packages/lldb/repl_swift' % (sys.version_info[0], sys.version_info[1]),
+            '/usr/lib/llvm-14/lib/python%d.%d/dist-packages/lldb/repl_swift' % (sys.version_info[0], sys.version_info[1]),
+            '/usr/lib/llvm-15/lib/python%d.%d/dist-packages/lldb/repl_swift' % (sys.version_info[0], sys.version_info[1]),
+            '/usr/bin/repl_swift',
+        ]
+
+        repl_swift_found = False
+        for sys_repl_swift in system_repl_swift_paths:
+            if os.path.isfile(sys_repl_swift):
+                if validate_only:
+                    print(f'  ℹ️  Using system repl_swift at {sys_repl_swift}')
+                kernel_env['REPL_SWIFT_PATH'] = sys_repl_swift
+                repl_swift_found = True
+                break
+
+        if not repl_swift_found:
+            raise Exception('repl_swift binary not found at %s (also checked system locations)' %
+                            kernel_env['REPL_SWIFT_PATH'])
+    else:
+        if validate_only:
+            print(f'  ✅ repl_swift found at {kernel_env["REPL_SWIFT_PATH"]}')
+
     if 'SWIFT_BUILD_PATH' in kernel_env and \
             not os.path.isfile(kernel_env['SWIFT_BUILD_PATH']):
         raise Exception('swift-build binary not found at %s' %

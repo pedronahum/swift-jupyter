@@ -54,6 +54,15 @@ This document summarizes the recent modernization of the swift-jupyter kernel, c
 - ❌ Second prompt "Proceed? (y/N)" → ✅ `swiftly install -y`
 - ❌ Dependency warnings → ✅ Install dependencies FIRST
 - ❌ Swift binary not found → ✅ Proper environment sourcing
+- ❌ LLDB Python bindings not found → ✅ Detect system LLDB (`python3-lldb-13`)
+- ❌ `repl_swift` not found → ✅ Fallback to system paths
+
+**register.py Enhancement**:
+Enhanced kernel registration to support Swiftly toolchains that use system-installed LLDB:
+- `linux_pythonpath()` now searches system LLDB paths (`/usr/lib/llvm-*/`)
+- `validate_kernel_env()` checks for `_lldb.cpython-*.so` (system naming)
+- `repl_swift` detection falls back to system LLVM installations
+- See [REGISTER_PY_SWIFTLY_SUPPORT.md](REGISTER_PY_SWIFTLY_SUPPORT.md) for details
 
 **Usage**:
 ```bash
@@ -62,7 +71,10 @@ This document summarizes the recent modernization of the swift-jupyter kernel, c
 
 **Installation Time**: ~3-5 minutes
 
-**Documentation**: See [COLAB_INSTALL_FIXED.md](COLAB_INSTALL_FIXED.md) for detailed technical explanation of all fixes
+**Documentation**:
+- [COLAB_INSTALL_FIXED.md](COLAB_INSTALL_FIXED.md) - Installation script fixes
+- [REGISTER_PY_SWIFTLY_SUPPORT.md](REGISTER_PY_SWIFTLY_SUPPORT.md) - Swiftly LLDB support
+- [INSTALL_SCRIPT_STATUS.md](INSTALL_SCRIPT_STATUS.md) - Quick reference
 
 ### 3. Comprehensive Documentation
 

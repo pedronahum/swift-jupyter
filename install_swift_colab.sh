@@ -156,8 +156,48 @@ if [ -z "$SWIFT_BIN" ]; then
     exit 1
 fi
 
-SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
+# The swift binary is at: ~/.local/share/swiftly/toolchains/<version>/usr/bin/swift
+# We need to get the toolchain root (one level up from usr)
+SWIFT_USR_BIN=$(dirname "$SWIFT_BIN")  # .../usr/bin
+SWIFT_USR=$(dirname "$SWIFT_USR_BIN")  # .../usr
+SWIFT_TOOLCHAIN_DIR=$(dirname "$SWIFT_USR")  # .../<version>
+
 echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
+
+# Verify LLDB Python bindings exist
+# Check common locations for LLDB Python bindings
+LLDB_PYTHON_CANDIDATES=(
+    "$SWIFT_TOOLCHAIN_DIR/usr/lib/python3/dist-packages"
+    "$SWIFT_TOOLCHAIN_DIR/usr/lib/python3.10/site-packages"
+    "$SWIFT_TOOLCHAIN_DIR/usr/lib/python3.11/site-packages"
+    "$SWIFT_TOOLCHAIN_DIR/usr/lib/python3.12/site-packages"
+)
+
+LLDB_PYTHON_DIR=""
+for candidate in "${LLDB_PYTHON_CANDIDATES[@]}"; do
+    if [ -d "$candidate/lldb" ]; then
+        LLDB_PYTHON_DIR="$candidate"
+        echo "✅ Found LLDB Python bindings at: $LLDB_PYTHON_DIR"
+        break
+    fi
+done
+
+if [ -z "$LLDB_PYTHON_DIR" ]; then
+    echo "⚠️  Warning: Could not find LLDB Python bindings in standard locations"
+    echo "   Checked:"
+    for candidate in "${LLDB_PYTHON_CANDIDATES[@]}"; do
+        echo "   - $candidate"
+    done
+    echo "   Will attempt registration anyway..."
+fi
+
+# Verify repl_swift exists
+REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN_DIR/usr/bin/repl_swift"
+if [ -f "$REPL_SWIFT_PATH" ]; then
+    echo "✅ Found repl_swift at: $REPL_SWIFT_PATH"
+else
+    echo "⚠️  Warning: repl_swift not found at: $REPL_SWIFT_PATH"
+fi
 echo ""
 
 # Step 3: Install Python dependencies
