@@ -63,6 +63,34 @@ echo ""
 
 echo "Installing required packages (needed before Swift installation)..."
 apt-get update -qq
+
+# First, find what LLDB packages are available
+echo "🔍 Checking available LLDB packages..."
+AVAILABLE_LLDB=$(apt-cache search python3-lldb | grep -E "^python3-lldb-[0-9]+" | head -5)
+echo "$AVAILABLE_LLDB"
+
+# Try to determine the best LLDB version to install
+# Check what python3-lldb recommends
+DEFAULT_LLDB=$(apt-cache show python3-lldb 2>/dev/null | grep "^Depends:" | grep -oP "python3-lldb-\K[0-9]+" | head -1)
+
+if [ -n "$DEFAULT_LLDB" ]; then
+    LLDB_PACKAGE="python3-lldb-${DEFAULT_LLDB}"
+    echo "→ Installing LLDB package: $LLDB_PACKAGE (system default)"
+else
+    # Fallback: try versions from newest to oldest
+    for ver in 18 17 16 15 14 13; do
+        if apt-cache show python3-lldb-$ver &>/dev/null; then
+            LLDB_PACKAGE="python3-lldb-$ver"
+            echo "→ Installing LLDB package: $LLDB_PACKAGE"
+            break
+        fi
+    done
+    if [ -z "$LLDB_PACKAGE" ]; then
+        echo "⚠️  Warning: No versioned python3-lldb found, trying python3-lldb..."
+        LLDB_PACKAGE="python3-lldb"
+    fi
+fi
+
 apt-get install -y -qq \
     libpython3-dev \
     libncurses5-dev \
@@ -70,10 +98,46 @@ apt-get install -y -qq \
     libtinfo5 \
     libz3-dev \
     pkg-config \
-    python3-lldb-13 \
+    $LLDB_PACKAGE \
     > /dev/null 2>&1
 
 echo "✅ System dependencies installed"
+
+# Verify LLDB was installed
+echo ""
+echo "🔍 Verifying LLDB installation..."
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
+echo "Python version: $PYTHON_VERSION"
+
+# Check for LLDB Python module in common locations
+LLDB_LOCATIONS=(
+    "/usr/lib/python3/dist-packages/lldb"
+    "/usr/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-13/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-14/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-15/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-16/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-17/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+    "/usr/lib/llvm-18/lib/python${PYTHON_VERSION}/dist-packages/lldb"
+)
+
+LLDB_FOUND=""
+for loc in "${LLDB_LOCATIONS[@]}"; do
+    if [ -d "$loc" ]; then
+        echo "✅ LLDB Python module found at: $loc"
+        LLDB_FOUND="$loc"
+        break
+    fi
+done
+
+if [ -z "$LLDB_FOUND" ]; then
+    echo "❌ Warning: LLDB Python module not found in any expected location!"
+    echo "   Checked:"
+    for loc in "${LLDB_LOCATIONS[@]}"; do
+        echo "   - $loc"
+    done
+    echo "   Registration may fail, but will attempt anyway..."
+fi
 echo ""
 
 # Step 2: Install Swiftly and Swift

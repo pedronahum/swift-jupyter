@@ -66,14 +66,26 @@ def linux_pythonpath(root):
         '/usr/lib/llvm-13/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
         '/usr/lib/llvm-14/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
         '/usr/lib/llvm-15/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-16/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-17/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
+        '/usr/lib/llvm-18/lib/python%d.%d/dist-packages' % (sys.version_info[0], sys.version_info[1]),
     ]
 
+    print(f'  🔍 Toolchain LLDB not found, searching system locations...')
+    print(f'     Python version: {sys.version_info[0]}.{sys.version_info[1]}')
+
     for sys_path in system_lldb_paths:
-        if os.path.isdir(sys_path) and os.path.isdir(os.path.join(sys_path, 'lldb')):
-            print(f'  ℹ️  Using system LLDB Python bindings at {sys_path}')
-            return sys_path
+        lldb_path = os.path.join(sys_path, 'lldb')
+        if os.path.isdir(sys_path):
+            if os.path.isdir(lldb_path):
+                print(f'  ✅ Found system LLDB Python bindings at {sys_path}')
+                return sys_path
+            else:
+                print(f'  ⚠️  Directory exists but no lldb: {sys_path}')
 
     # Fallback to generic dist-packages (let validation catch if it doesn't exist)
+    print(f'  ❌ No system LLDB found in any location')
+    print(f'  ⚠️  Falling back to: {generic_dist} (likely to fail)')
     return generic_dist
 
 
