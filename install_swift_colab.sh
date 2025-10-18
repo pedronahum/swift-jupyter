@@ -26,18 +26,15 @@ if [ -n "$COLAB_GPU" ] || [ -d "/content" ]; then
     echo "✅ Google Colab environment detected"
     IS_COLAB=true
     INSTALL_DIR="/content/swift-jupyter"
-    SWIFT_DIR="/content/swift"
 else
     echo "⚠️  Not running in Google Colab (will install to current directory)"
     IS_COLAB=false
     INSTALL_DIR="$PWD/swift-jupyter"
-    SWIFT_DIR="$PWD/swift"
 fi
 
 echo ""
-echo "Installation directories:"
+echo "Installation directory:"
 echo "  Swift Jupyter: $INSTALL_DIR"
-echo "  Swift Toolchain: $SWIFT_DIR"
 echo ""
 
 # Check system info
@@ -58,51 +55,62 @@ if [ "$(uname -m)" != "x86_64" ]; then
     exit 1
 fi
 
-# Step 1: Download and extract Swift 6.3 Development Snapshot (October 10, 2024)
+# Step 1: Install Swiftly and Swift
 echo "=============================================="
-echo "Step 1: Installing Swift 6.3 Dev Snapshot"
+echo "Step 1: Installing Swiftly & Swift"
 echo "=============================================="
 echo ""
 
-SWIFT_VERSION="swift-DEVELOPMENT-SNAPSHOT-2024-10-10-a"
-SWIFT_PLATFORM="ubuntu2204"
-SWIFT_URL="https://download.swift.org/development/ubuntu2204/${SWIFT_VERSION}/${SWIFT_VERSION}-${SWIFT_PLATFORM}.tar.gz"
+# Check if swiftly is already installed
+if command -v swiftly &> /dev/null; then
+    echo "✅ Swiftly already installed"
+else
+    echo "Installing Swiftly (Swift toolchain manager)..."
 
-echo "Downloading Swift from:"
-echo "  $SWIFT_URL"
-echo ""
+    # Install Swiftly
+    curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
 
-if [ -d "$SWIFT_DIR" ]; then
-    echo "⚠️  Swift directory already exists, removing..."
-    rm -rf "$SWIFT_DIR"
+    # Add swiftly to PATH for this session
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Verify swiftly installation
+    if ! command -v swiftly &> /dev/null; then
+        echo "❌ Error: Swiftly installation failed"
+        exit 1
+    fi
+
+    echo "✅ Swiftly installed successfully"
 fi
 
-mkdir -p "$SWIFT_DIR"
-cd "$(dirname "$SWIFT_DIR")"
-
-echo "Downloading Swift (this may take a few minutes)..."
-if ! wget -q --show-progress "$SWIFT_URL" -O swift.tar.gz; then
-    echo "❌ Error: Failed to download Swift"
-    exit 1
-fi
-
-echo "Extracting Swift..."
-tar -xzf swift.tar.gz
-mv "${SWIFT_VERSION}-${SWIFT_PLATFORM}" "$SWIFT_DIR"
-rm swift.tar.gz
-
-echo "✅ Swift installed to: $SWIFT_DIR"
 echo ""
+echo "Installing Swift main-snapshot..."
+echo "This will download and install the latest Swift development snapshot."
+echo "This may take several minutes..."
+echo ""
+
+# Install Swift main snapshot using swiftly
+swiftly install main-snapshot --no-modify-profile
+
+echo ""
+echo "✅ Swift installed successfully"
+echo ""
+
+# Use swiftly to set up the environment
+eval "$(swiftly init bash)"
 
 # Verify Swift installation
-SWIFT_BIN="$SWIFT_DIR/usr/bin/swift"
-if [ ! -f "$SWIFT_BIN" ]; then
-    echo "❌ Error: Swift binary not found at $SWIFT_BIN"
+if ! command -v swift &> /dev/null; then
+    echo "❌ Error: Swift binary not found after installation"
     exit 1
 fi
 
 echo "Swift version:"
-"$SWIFT_BIN" --version
+swift --version
+echo ""
+
+# Get Swift installation directory for kernel registration
+SWIFT_TOOLCHAIN_DIR=$(swiftly which swift | xargs dirname | xargs dirname)
+echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
 echo ""
 
 # Step 2: Install required system dependencies
@@ -163,7 +171,7 @@ echo ""
 echo "Registering Swift kernel with Jupyter..."
 python3 register.py \
     --sys-prefix \
-    --swift-toolchain "$SWIFT_DIR"
+    --swift-toolchain "$SWIFT_TOOLCHAIN_DIR"
 
 echo ""
 echo "✅ Swift kernel registered!"
@@ -188,17 +196,22 @@ echo ""
 # Create a Python initialization script for Colab
 cat > /content/init_swift.py << 'EOF'
 # Swift Jupyter Kernel - Colab Initialization
+import subprocess
 import os
-import sys
 
-# Add Swift library paths to LD_LIBRARY_PATH
-swift_lib_path = '/content/swift/usr/lib/swift/linux'
-if 'LD_LIBRARY_PATH' in os.environ:
-    os.environ['LD_LIBRARY_PATH'] = swift_lib_path + ':' + os.environ['LD_LIBRARY_PATH']
-else:
-    os.environ['LD_LIBRARY_PATH'] = swift_lib_path
+# Initialize swiftly environment
+result = subprocess.run(['bash', '-c', 'eval "$(swiftly init bash)" && env'],
+                       capture_output=True, text=True)
+
+# Parse environment variables set by swiftly
+for line in result.stdout.split('\n'):
+    if '=' in line:
+        key, value = line.split('=', 1)
+        if key in ['PATH', 'LD_LIBRARY_PATH']:
+            os.environ[key] = value
 
 print("✅ Swift Jupyter kernel environment initialized")
+print("✅ Swiftly environment loaded")
 print("")
 print("To use Swift in this Colab notebook:")
 print("  1. Runtime → Change runtime type")
@@ -306,9 +319,12 @@ echo ""
 echo "Swift Jupyter kernel has been successfully installed!"
 echo ""
 echo "Installation Details:"
-echo "  Swift Version: 6.3 Development Snapshot (Oct 10, 2024)"
+echo "  Swift: Latest main-snapshot (installed via Swiftly)"
 echo "  Kernel Location: $(jupyter --data-dir)/kernels/swift"
-echo "  Swift Location: $SWIFT_DIR"
+echo "  Swift Toolchain: $SWIFT_TOOLCHAIN_DIR"
+echo ""
+echo "To check Swift version:"
+echo "  swift --version"
 echo ""
 
 if [ "$IS_COLAB" = true ]; then

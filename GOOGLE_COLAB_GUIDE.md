@@ -20,7 +20,8 @@ Copy and paste this into a code cell and run it:
 **Installation time**: ~3-5 minutes
 
 The script will:
-- ✅ Download Swift 6.3 Development Snapshot (October 10, 2024)
+- ✅ Install Swiftly (Swift toolchain manager)
+- ✅ Download and install Swift main-snapshot (latest development snapshot)
 - ✅ Install all system dependencies
 - ✅ Install Jupyter kernel dependencies
 - ✅ Register the Swift kernel
@@ -522,4 +523,4 @@ If you encounter issues:
 
 ---
 
-**Note**: This installation script downloads Swift 6.3 Development Snapshot (October 10, 2024) which is approximately 600MB. Make sure you have a stable internet connection.
+**Note**: This installation script uses Swiftly to download and install the latest Swift main-snapshot (approximately 600MB). Make sure you have a stable internet connection.
