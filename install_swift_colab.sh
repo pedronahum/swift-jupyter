@@ -67,11 +67,21 @@ if command -v swiftly &> /dev/null; then
 else
     echo "Installing Swiftly (Swift toolchain manager)..."
 
-    # Install Swiftly
-    curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
+    # Install Swiftly (official method from swift.org)
+    curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz && \
+    tar zxf swiftly-$(uname -m).tar.gz && \
+    ./swiftly init --quiet-shell-followup
 
-    # Add swiftly to PATH for this session
-    export PATH="$HOME/.local/bin:$PATH"
+    # Clean up
+    rm -f swiftly-$(uname -m).tar.gz
+
+    # Source swiftly environment
+    if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
+        . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+    fi
+
+    # Update hash table
+    hash -r
 
     # Verify swiftly installation
     if ! command -v swiftly &> /dev/null; then
@@ -89,18 +99,24 @@ echo "This may take several minutes..."
 echo ""
 
 # Install Swift main snapshot using swiftly
-swiftly install main-snapshot --no-modify-profile
+swiftly install main-snapshot
 
 echo ""
 echo "✅ Swift installed successfully"
 echo ""
 
-# Use swiftly to set up the environment
-eval "$(swiftly init bash)"
-
 # Verify Swift installation
 if ! command -v swift &> /dev/null; then
     echo "❌ Error: Swift binary not found after installation"
+    echo "Trying to source swiftly environment again..."
+    if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
+        . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+        hash -r
+    fi
+fi
+
+if ! command -v swift &> /dev/null; then
+    echo "❌ Error: Swift binary still not found"
     exit 1
 fi
 
@@ -109,7 +125,9 @@ swift --version
 echo ""
 
 # Get Swift installation directory for kernel registration
-SWIFT_TOOLCHAIN_DIR=$(swiftly which swift | xargs dirname | xargs dirname)
+# Swiftly uses $HOME/.local/share/swiftly/toolchains/...
+SWIFT_BIN=$(which swift)
+SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
 echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
 echo ""
 
@@ -199,16 +217,13 @@ cat > /content/init_swift.py << 'EOF'
 import subprocess
 import os
 
-# Initialize swiftly environment
-result = subprocess.run(['bash', '-c', 'eval "$(swiftly init bash)" && env'],
-                       capture_output=True, text=True)
-
-# Parse environment variables set by swiftly
-for line in result.stdout.split('\n'):
-    if '=' in line:
-        key, value = line.split('=', 1)
-        if key in ['PATH', 'LD_LIBRARY_PATH']:
-            os.environ[key] = value
+# Source swiftly environment and get PATH
+swiftly_env = os.path.expanduser('~/.local/share/swiftly/env.sh')
+if os.path.exists(swiftly_env):
+    result = subprocess.run(['bash', '-c', f'source {swiftly_env} && echo $PATH'],
+                           capture_output=True, text=True)
+    if result.returncode == 0:
+        os.environ['PATH'] = result.stdout.strip() + ':' + os.environ.get('PATH', '')
 
 print("✅ Swift Jupyter kernel environment initialized")
 print("✅ Swiftly environment loaded")
