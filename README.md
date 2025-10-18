@@ -130,34 +130,56 @@ Use macOS system Python which is binary-compatible with LLDB:
   --swift-toolchain <path to swift toolchain>
 ```
 
-#### Option 2: Google Colab 🚀 (One-Click Install) - **READY FOR TESTING**
+#### Option 2: Google Colab 🚀 (Two Approaches)
+
+**⭐ Recommended: Cell Magic Approach**
+
+Use `%%swift` magic in Python notebooks (simpler, more reliable):
 
 ```bash
-# Run this in a Colab notebook cell:
-!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
+# Installation:
+!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab_magic.sh | bash
+
+# Activation (run once per session):
+%run /content/setup_swift_magic.py
+
+# Usage (in any cell):
+%%swift
+print("Hello from Swift!")
 ```
 
-**Status**: ✅ Complete - All installation errors fixed and ready for testing in Colab
+**Advantages**:
+- ✅ Simpler setup (no kernel registration)
+- ✅ Mix Python and Swift in same notebook
+- ✅ More reliable (explicit environment)
+- ✅ Better error messages
 
-This fully-automated script will:
-- Install system dependencies (libz3-dev, pkg-config, python3-lldb-13)
-- Download and install Swiftly (official Swift toolchain manager)
-- Install Swift main-snapshot (latest development snapshot)
-- Register the Swift kernel with Jupyter
-- Create test notebook at `/content/swift_test.ipynb`
-- Set up environment for immediate use
+**Alternative: Full Kernel Approach**
 
-**Installation time**: ~3-5 minutes (downloads ~600MB Swift toolchain)
+Register Swift as a complete Jupyter kernel:
 
-**After installation**:
-1. Restart runtime (Runtime → Restart runtime)
-2. Change runtime type to "Swift" (Runtime → Change runtime type)
-3. Test with: `print("Hello from Swift!")`
+```bash
+# Installation:
+!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
+
+# After installation:
+# 1. Runtime → Restart runtime
+# 2. Runtime → Change runtime type → Swift
+# 3. All cells run Swift directly (no %%swift needed)
+```
+
+**Advantages**:
+- ✅ Pure Swift notebooks
+- ✅ Traditional Jupyter kernel experience
+- ✅ Runtime switching
+
+**Installation time**: ~3-5 minutes for both approaches
 
 **Documentation**:
-- **[GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md)** - Complete user guide with 10+ examples
-- **[COLAB_INSTALL_FIXED.md](COLAB_INSTALL_FIXED.md)** - Technical details of installation fixes
-- **[INSTALL_SCRIPT_STATUS.md](INSTALL_SCRIPT_STATUS.md)** - Quick reference and testing checklist
+- **[COLAB_INSTALLATION_GUIDE.md](COLAB_INSTALLATION_GUIDE.md)** - ⭐ Complete comparison and guide
+- **[GOOGLE_COLAB_GUIDE.md](GOOGLE_COLAB_GUIDE.md)** - Examples and tutorials
+- **[install_swift_colab_magic.sh](install_swift_colab_magic.sh)** - Cell magic installer (recommended)
+- **[install_swift_colab.sh](install_swift_colab.sh)** - Full kernel installer
 
 #### Option 3: Ubuntu with Python 3.9+
 
