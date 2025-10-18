@@ -16,14 +16,8 @@
 
 import glob
 import json
-import os
-import sys
-
-# Add LLDB Python path if PYTHONPATH is set (from kernel.json env)
-if 'PYTHONPATH' in os.environ and os.environ['PYTHONPATH'] not in sys.path:
-    sys.path.insert(0, os.environ['PYTHONPATH'])
-
 import lldb
+import os
 import stat
 import re
 import shlex
@@ -104,114 +98,35 @@ class PackageInstallException(Exception):
 
 
 class SwiftError(ExecutionResultError):
-    """There was a compile or runtime error (R5-T3 enhanced).
-
-    This class now provides better error formatting including:
-    - Structured error information
-    - Error type detection
-    - Cleaned error messages
-    - Better Unicode handling in error text
-    """
+    """There was a compile or runtime error."""
     def __init__(self, result):
         self.result = result # SBValue
-        self._parsed_error = None
 
     def description(self):
-        """Get error description with improved formatting."""
-        error_desc = self.result.error.description
-
-        # Decode if bytes (shouldn't happen in Python 3, but be safe)
-        if isinstance(error_desc, bytes):
-            error_desc = error_desc.decode('utf-8', errors='replace')
-
-        return error_desc
-
-    def get_error_type(self):
-        """Extract error type from LLDB error.
-
-        Returns:
-            str: Error type like 'error', 'warning', 'note', or 'unknown'
-        """
-        desc = self.description()
-        if 'error:' in desc.lower():
-            return 'error'
-        elif 'warning:' in desc.lower():
-            return 'warning'
-        elif 'note:' in desc.lower():
-            return 'note'
-        return 'unknown'
-
-    def get_cleaned_message(self):
-        """Get a cleaned, more readable error message.
-
-        Removes LLDB-specific noise and formats the message better.
-        """
-        desc = self.description()
-
-        # Remove common LLDB prefixes
-        prefixes_to_remove = [
-            'error: <EXPR>:',
-            'Execution was interrupted, reason: ',
-        ]
-
-        for prefix in prefixes_to_remove:
-            if desc.startswith(prefix):
-                desc = desc[len(prefix):].lstrip()
-
-        return desc.strip()
+        return self.result.error.description
 
     def __repr__(self):
-        return 'SwiftError(type=%s, description=%s)' % (
-            self.get_error_type(), repr(self.get_cleaned_message()))
+        return 'SwiftError(result=%s, description=%s)' % (
+            repr(self.result), repr(self.description()))
 
 
 class SIGINTHandler(threading.Thread):
     """Interrupts currently-executing code whenever the process receives a
-       SIGINT (R5-T2 enhanced).
-
-    This handler works in conjunction with the message-based interrupt handler
-    (interrupt_request) from R3. Both mechanisms are supported:
-    - Signal-based (SIGINT): For backward compatibility and old Jupyter clients
-    - Message-based: For Protocol 5.4+ clients (see interrupt_request method)
-
-    The handler now includes:
-    - Interrupt flag tracking
-    - Better logging
-    - Exception handling
-    """
+       SIGINT."""
 
     daemon = True
 
     def __init__(self, kernel):
         super(SIGINTHandler, self).__init__()
         self.kernel = kernel
-        self.interrupted = False
-        self.interrupt_count = 0
 
     def run(self):
         try:
             while True:
                 signal.sigwait([signal.SIGINT])
-                self.interrupt_count += 1
-                self.interrupted = True
-
-                self.kernel.log.info(
-                    f'🛑 SIGINTHandler: Received SIGINT (count: {self.interrupt_count})')
-
-                if not self.kernel.process or not self.kernel.process.IsValid():
-                    self.kernel.log.warning(
-                        'SIGINTHandler: No valid process to interrupt')
-                    continue
-
-                try:
-                    self.kernel.process.SendAsyncInterrupt()
-                    self.kernel.log.info('SIGINTHandler: Sent async interrupt to LLDB')
-                except Exception as interrupt_error:
-                    self.kernel.log.error(
-                        f'SIGINTHandler: Failed to interrupt: {interrupt_error}')
-
+                self.kernel.process.SendAsyncInterrupt()
         except Exception as e:
-            self.kernel.log.error(f'Exception in SIGINTHandler: {e}', exc_info=True)
+            self.kernel.log.error('Exception in SIGINTHandler: %s' % str(e))
 
 
 class StdoutHandler(threading.Thread):
@@ -226,23 +141,11 @@ class StdoutHandler(threading.Thread):
         self.had_stdout = False
 
     def _get_stdout(self):
-        """Get stdout from LLDB process with Unicode handling (R5-T1)."""
         while True:
             BUFFER_SIZE = 1000
             stdout_buffer = self.kernel.process.GetSTDOUT(BUFFER_SIZE)
             if len(stdout_buffer) == 0:
                 break
-
-            # LLDB returns bytes; decode to Unicode string
-            # Use 'replace' error handling to avoid crashes on invalid UTF-8
-            if isinstance(stdout_buffer, bytes):
-                try:
-                    stdout_buffer = stdout_buffer.decode('utf-8', errors='replace')
-                except Exception as e:
-                    self.kernel.log.warning(f'Error decoding stdout: {e}')
-                    # Fallback to latin-1 which never fails
-                    stdout_buffer = stdout_buffer.decode('latin-1')
-
             yield stdout_buffer
 
     # Sends stdout to the jupyter client, replacing the ANSI sequence for
@@ -576,12 +479,9 @@ class SwiftKernel(Kernel):
         self.debugger.SetScriptLanguage(lldb.eScriptLanguageNone)
 
         repl_swift = os.environ['REPL_SWIFT_PATH']
-        # Explicitly specify architecture for Apple Silicon compatibility
-        import platform
-        arch = platform.machine()  # Returns 'arm64' on Apple Silicon, 'x86_64' on Intel
-        self.target = self.debugger.CreateTargetWithFileAndArch(repl_swift, arch)
+        self.target = self.debugger.CreateTargetWithFileAndArch(repl_swift, '')
         if not self.target:
-            raise Exception('Could not create target %s with arch %s' % (repl_swift, arch))
+            raise Exception('Could not create target %s' % repl_swift)
 
         self.main_bp = self.target.BreakpointCreateByName(
             'repl_main', self.target.GetExecutable().GetFilename())
@@ -966,7 +866,7 @@ class SwiftKernel(Kernel):
         # == Create the SwiftPM package ==
 
         package_swift_template = textwrap.dedent("""\
-            // swift-tools-version:5.5
+            // swift-tools-version:4.2
             import PackageDescription
             let package = Package(
                 name: "jupyterInstalledPackages",
@@ -1141,18 +1041,11 @@ class SwiftKernel(Kernel):
         })
         self._init_swift()
 
-        # Use Darwin on macOS, Glibc on Linux
-        import platform
-        if platform.system() == 'Darwin':
-            dlopen_module = 'Darwin'
-        else:
-            dlopen_module = 'Glibc'
-
         dynamic_load_code = textwrap.dedent("""\
-            import func {module}.dlopen
-            import var {module}.RTLD_NOW
-            dlopen({lib}, RTLD_NOW)
-        """.format(module=dlopen_module, lib=json.dumps(lib_filename)))
+            import func Glibc.dlopen
+            import var Glibc.RTLD_NOW
+            dlopen(%s, RTLD_NOW)
+        """ % json.dumps(lib_filename))
         dynamic_load_result = self._execute(dynamic_load_code)
         if not isinstance(dynamic_load_result, SuccessWithValue):
             raise PackageInstallException(
@@ -1170,39 +1063,11 @@ class SwiftKernel(Kernel):
         self.already_installed_packages = True
 
     def _execute(self, code):
-        """Execute Swift code in LLDB with proper Unicode handling (R5-T1).
-
-        This method ensures that code containing Unicode characters (emoji,
-        Chinese, etc.) is properly handled by LLDB. Python 3 strings are
-        already Unicode, but we need to ensure proper encoding/decoding
-        when communicating with LLDB.
-
-        Args:
-            code: Swift source code to execute (Python str, Unicode)
-
-        Returns:
-            ExecutionResult: Success or error result from LLDB
-        """
         locationDirective = '#sourceLocation(file: "%s", line: 1)' % (
             self._file_name_for_source_location())
         codeWithLocationDirective = locationDirective + '\n' + code
-
-        # Python 3 strings are Unicode by default. LLDB's EvaluateExpression
-        # expects a string and handles encoding internally. We just need to
-        # ensure the string is properly formed.
-        #
-        # Note: If we need to explicitly encode/decode in the future:
-        # - code_bytes = code.encode('utf-8')
-        # - result_str = result_bytes.decode('utf-8', errors='replace')
-
-        try:
-            result = self.target.EvaluateExpression(
-                    codeWithLocationDirective, self.expr_opts)
-        except Exception as e:
-            self.log.error(f'Exception during LLDB evaluation: {e}', exc_info=True)
-            # Return a synthetic error result
-            return PreprocessorError(PreprocessorException(
-                f'LLDB evaluation failed: {str(e)}'))
+        result = self.target.EvaluateExpression(
+                codeWithLocationDirective, self.expr_opts)
 
         if result.error.type == lldb.eErrorTypeInvalid:
             return SuccessWithValue(result)
@@ -1300,16 +1165,6 @@ class SwiftKernel(Kernel):
             raise Exception('Error setting parent message: %s' % result)
 
     def _get_pretty_main_thread_stack_trace(self):
-        """Get formatted stack trace from LLDB (R5-T3 enhanced).
-
-        Returns a list of formatted stack trace strings, filtering out:
-        - Library frames without source location
-        - Compiler-generated frames
-        - LLDB internal frames
-
-        Each frame is formatted as:
-        "  at function_name (File.swift:line:column)"
-        """
         stack_trace = []
         for frame in self.main_thread:
             # Do not include frames without source location information. These
@@ -1317,27 +1172,11 @@ class SwiftKernel(Kernel):
             # expression execution implementation.
             if not frame.line_entry.file:
                 continue
-
             # Do not include <compiler-generated> frames. These are
             # specializations of library functions.
             if frame.line_entry.file.fullpath == '<compiler-generated>':
                 continue
-
-            # Format frame information nicely
-            try:
-                file_name = frame.line_entry.file.basename
-                line_num = frame.line_entry.line
-                col_num = frame.line_entry.column
-                func_name = frame.name or '<unknown>'
-
-                # Create formatted frame string
-                formatted_frame = f'  at {func_name} ({file_name}:{line_num}:{col_num})'
-                stack_trace.append(formatted_frame)
-            except Exception as e:
-                # Fallback to string representation if formatting fails
-                self.log.warning(f'Error formatting stack frame: {e}')
-                stack_trace.append(str(frame))
-
+            stack_trace.append(str(frame))
         return stack_trace
 
     def _make_execute_reply_error_message(self, traceback):
@@ -1468,14 +1307,8 @@ class SwiftKernel(Kernel):
 
             # There is no stdout, so it must be a compile error. Simply return
             # the error without trying to get a stack trace.
-            # Use enhanced error formatting from R5-T3
-            if isinstance(result, SwiftError):
-                error_msg = result.get_cleaned_message()
-            else:
-                error_msg = result.description()
-
-            self._send_iopub_error_message([error_msg])
-            return self._make_execute_reply_error_message([error_msg])
+            self._send_iopub_error_message([result.description()])
+            return self._make_execute_reply_error_message([result.description()])
 
     def do_complete(self, code, cursor_pos):
         """Handle code completion request with Unicode-aware cursor positioning.

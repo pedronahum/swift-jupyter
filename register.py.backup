@@ -85,13 +85,9 @@ def make_kernel_env(args):
             
             # Set DYLD_FRAMEWORK_PATH so _lldb can find the LLDB framework
             kernel_env['DYLD_FRAMEWORK_PATH'] = lldb_framework_path
-
+            
             # Always use toolchain_root for LD_LIBRARY_PATH to avoid double /usr/usr
             kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/macosx' % toolchain_root
-
-            # Set SWIFT_BUILD_PATH for %install directive support
-            kernel_env['SWIFT_BUILD_PATH'] = '%s/usr/bin/swift-build' % toolchain_root
-            kernel_env['SWIFT_PACKAGE_PATH'] = '%s/usr/bin/swift-package' % toolchain_root
         elif platform.system() == 'Windows':
             kernel_env['PYTHONPATH'] = os.path.join('%s','usr','lib','site-packages') % args.swift_toolchain
             kernel_env['LD_LIBRARY_PATH'] = os.path.join(os.path.dirname(os.path.dirname(args.swift_toolchain)),
@@ -154,26 +150,12 @@ def make_kernel_env(args):
     return kernel_env
 
 
-def validate_kernel_env(kernel_env, validate_only=False):
-    """Validates that the env vars refer to things that actually exist (R2-T1 enhanced).
-
-    Args:
-        kernel_env: Dictionary of environment variables
-        validate_only: If True, only validate without registration
-
-    Returns:
-        bool: True if validation passes (when validate_only=True)
-
-    Raises:
-        Exception: If validation fails
-    """
+def validate_kernel_env(kernel_env):
+    """Validates that the env vars refer to things that actually exist."""
     # Check for LLDB Python module
     pythonpath = kernel_env['PYTHONPATH']
     lldb_dir = os.path.join(pythonpath, 'lldb')
-
-    if validate_only:
-        print('🔍 Validating LLDB installation...')
-
+    
     if platform.system() == 'Windows':
         lldb_module = os.path.join(pythonpath, 'lldb', '_lldb.pyd')
         if not os.path.isfile(lldb_module):
@@ -185,8 +167,6 @@ def validate_kernel_env(kernel_env, validate_only=False):
         # Check for __init__.py which indicates it's a valid Python module
         if not os.path.isfile(os.path.join(lldb_dir, '__init__.py')):
             raise Exception('lldb python module __init__.py not found at %s' % lldb_dir)
-        if validate_only:
-            print(f'  ✅ LLDB Python module found at {lldb_dir}')
     else:
         lldb_module = os.path.join(pythonpath, 'lldb', '_lldb.so')
         if not os.path.isfile(lldb_module):
@@ -194,8 +174,6 @@ def validate_kernel_env(kernel_env, validate_only=False):
     if not os.path.isfile(kernel_env['REPL_SWIFT_PATH']):
         raise Exception('repl_swift binary not found at %s' %
                         kernel_env['REPL_SWIFT_PATH'])
-    if validate_only:
-        print(f'  ✅ repl_swift binary found at {kernel_env["REPL_SWIFT_PATH"]}')
     if 'SWIFT_BUILD_PATH' in kernel_env and \
             not os.path.isfile(kernel_env['SWIFT_BUILD_PATH']):
         raise Exception('swift-build binary not found at %s' %
@@ -208,8 +186,6 @@ def validate_kernel_env(kernel_env, validate_only=False):
             not os.path.isfile(kernel_env['PYTHON_LIBRARY']):
         raise Exception('python library not found at %s' %
                         kernel_env['PYTHON_LIBRARY'])
-    if validate_only and 'PYTHON_LIBRARY' in kernel_env:
-        print(f'  ✅ Python library found at {kernel_env["PYTHON_LIBRARY"]}')
 
     lib_paths = kernel_env['LD_LIBRARY_PATH'].split(':') if platform.system() != 'Windows' else \
                                                             kernel_env['LD_LIBRARY_PATH'].split(';') # ':' proceeds after drive letter in Windows
@@ -222,41 +198,24 @@ def validate_kernel_env(kernel_env, validate_only=False):
         # Other LD_LIBRARY_PATHs may be appended for other libs.
         raise Exception('shared lib dir not found at %s' % lib_path)
 
-    if validate_only:
-        print('✅ All validation checks passed!')
-        return True
-
 def main():
     args = parse_args()
     kernel_env = make_kernel_env(args)
-
-    # Validate environment (R2-T1)
-    if args.validate_only:
-        validate_kernel_env(kernel_env, validate_only=True)
-        print('\n✅ Validation complete - environment is ready for kernel registration')
-        return
-    else:
-        validate_kernel_env(kernel_env, validate_only=False)
+    validate_kernel_env(kernel_env)
 
     script_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
-
-    # Determine which Python executable to use
-    python_executable = args.python_executable if args.python_executable else sys.executable
-
-    # Build kernel.json with Protocol 5.4 features (R2-T2)
     kernel_json = {
         'argv': [
-            python_executable,
+            sys.executable,
             os.path.join(script_dir,'swift_kernel.py'),
             '-f',
             '{connection_file}',
         ],
         'display_name': args.kernel_name,
         'language': 'swift',
-        'interrupt_mode': 'message',  # R2-T2: Enable Protocol 5.4 message-based interrupts
         'env': kernel_env,
     }
-
+    
     print('kernel.json:\n%s\n' % json.dumps(kernel_json, indent=2))
 
     kernel_code_name = get_kernel_code_name(args.kernel_name)
@@ -327,17 +286,6 @@ def parse_args():
         action='store_true',
         help='set LD_LIBRARY_PATH to search for shared libs installed in '
              'the current conda environment')
-
-    parser.add_argument(
-        '--python-executable',
-        help='Path to the Python executable to use for the kernel (default: sys.executable). '
-             'Use /usr/bin/python3 on macOS to ensure LLDB binary compatibility.')
-
-    parser.add_argument(
-        '--validate-only',
-        action='store_true',
-        dest='validate_only',
-        help='(R2-T3) validate the Swift/LLDB installation without registering the kernel')
 
     args = parser.parse_args()
     if args.sys_prefix:
