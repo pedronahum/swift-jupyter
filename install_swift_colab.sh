@@ -441,6 +441,29 @@ if old_validation in content:
 else:
     print('  ⚠️  validate_kernel_env check not found or already patched')
 
+# ===== PATCH 3: Add PATH to kernel_env for Swiftly =====
+# Find the make_kernel_env function for Linux and add PATH
+old_linux_env = '''        if platform.system() == 'Linux':
+            kernel_env['PYTHONPATH'] = linux_pythonpath(args.swift_toolchain + '/usr')
+            kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/linux' % args.swift_toolchain
+            kernel_env['REPL_SWIFT_PATH'] = '%s/usr/bin/repl_swift' % args.swift_toolchain'''
+
+new_linux_env = '''        if platform.system() == 'Linux':
+            kernel_env['PYTHONPATH'] = linux_pythonpath(args.swift_toolchain + '/usr')
+            kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/linux' % args.swift_toolchain
+            kernel_env['REPL_SWIFT_PATH'] = '%s/usr/bin/repl_swift' % args.swift_toolchain
+            # Add PATH for Swiftly toolchains so swift binaries can be found
+            swift_bin_path = '%s/usr/bin' % args.swift_toolchain
+            current_path = os.environ.get('PATH', '/usr/bin:/bin')
+            kernel_env['PATH'] = f'{swift_bin_path}:{current_path}' '''
+
+if old_linux_env in content:
+    content = content.replace(old_linux_env, new_linux_env)
+    patches_applied += 1
+    print('  ✅ Patched kernel_env to include PATH for Swift binaries')
+else:
+    print('  ⚠️  Linux kernel_env section not found or already patched')
+
 # Write back
 with open(register_py, 'w') as f:
     f.write(content)
