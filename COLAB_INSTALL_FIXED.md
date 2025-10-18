@@ -61,7 +61,25 @@ swiftly install main-snapshot
 
 (Removed `--no-modify-profile` as it's not needed with the new installation method)
 
-### 3. Toolchain Directory Detection ([install_swift_colab.sh:127-131](install_swift_colab.sh))
+### 3. Environment Sourcing ([install_swift_colab.sh:108-118](install_swift_colab.sh))
+
+After installing Swift, we must source the swiftly environment:
+
+```bash
+# Source swiftly environment to make swift available
+echo "Loading swiftly environment..."
+if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
+    . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+else
+    # Try default location
+    . "$HOME/.local/share/swiftly/env.sh"
+fi
+
+# Update hash table
+hash -r
+```
+
+### 4. Toolchain Directory Detection ([install_swift_colab.sh:133-140](install_swift_colab.sh))
 
 **Before**:
 ```bash
@@ -72,10 +90,30 @@ SWIFT_TOOLCHAIN_DIR=$(swiftly which swift | xargs dirname | xargs dirname)
 ```bash
 # Swiftly uses $HOME/.local/share/swiftly/toolchains/...
 SWIFT_BIN=$(which swift)
+if [ -z "$SWIFT_BIN" ]; then
+    echo "❌ Error: Could not find swift binary"
+    exit 1
+fi
+
 SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
 ```
 
-### 4. Environment Initialization ([install_swift_colab.sh:220-227](install_swift_colab.sh))
+### 5. System Dependencies ([install_swift_colab.sh:151-159](install_swift_colab.sh))
+
+Added Swift-recommended dependencies:
+
+```bash
+apt-get install -y -qq \
+    libpython3-dev \
+    libncurses5-dev \
+    libncurses5 \
+    libtinfo5 \
+    libz3-dev \
+    pkg-config \
+    python3-lldb-13
+```
+
+### 6. Environment Initialization ([install_swift_colab.sh:220-227](install_swift_colab.sh))
 
 Simplified the Python initialization script to directly source swiftly's environment file:
 
@@ -89,18 +127,16 @@ if os.path.exists(swiftly_env):
         os.environ['PATH'] = result.stdout.strip() + ':' + os.environ.get('PATH', '')
 ```
 
-### 5. Error Handling ([install_swift_colab.sh:108-121](install_swift_colab.sh))
+### 7. Error Handling ([install_swift_colab.sh:120-125](install_swift_colab.sh))
 
-Added better error handling with retry logic:
+Added better error handling:
 
 ```bash
+# Verify Swift installation
 if ! command -v swift &> /dev/null; then
     echo "❌ Error: Swift binary not found after installation"
-    echo "Trying to source swiftly environment again..."
-    if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
-        . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-        hash -r
-    fi
+    echo "PATH: $PATH"
+    exit 1
 fi
 ```
 

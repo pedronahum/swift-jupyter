@@ -105,18 +105,22 @@ echo ""
 echo "✅ Swift installed successfully"
 echo ""
 
+# Source swiftly environment to make swift available
+echo "Loading swiftly environment..."
+if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
+    . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+else
+    # Try default location
+    . "$HOME/.local/share/swiftly/env.sh"
+fi
+
+# Update hash table
+hash -r
+
 # Verify Swift installation
 if ! command -v swift &> /dev/null; then
     echo "❌ Error: Swift binary not found after installation"
-    echo "Trying to source swiftly environment again..."
-    if [ -f "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh" ]; then
-        . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
-        hash -r
-    fi
-fi
-
-if ! command -v swift &> /dev/null; then
-    echo "❌ Error: Swift binary still not found"
+    echo "PATH: $PATH"
     exit 1
 fi
 
@@ -127,6 +131,11 @@ echo ""
 # Get Swift installation directory for kernel registration
 # Swiftly uses $HOME/.local/share/swiftly/toolchains/...
 SWIFT_BIN=$(which swift)
+if [ -z "$SWIFT_BIN" ]; then
+    echo "❌ Error: Could not find swift binary"
+    exit 1
+fi
+
 SWIFT_TOOLCHAIN_DIR=$(dirname $(dirname "$SWIFT_BIN"))
 echo "Swift toolchain directory: $SWIFT_TOOLCHAIN_DIR"
 echo ""
@@ -144,6 +153,9 @@ apt-get install -y -qq \
     libncurses5-dev \
     libncurses5 \
     libtinfo5 \
+    libz3-dev \
+    pkg-config \
+    python3-lldb-13 \
     > /dev/null 2>&1
 
 echo "✅ System dependencies installed"
