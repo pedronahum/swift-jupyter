@@ -495,11 +495,82 @@ echo ""
 # Verify kernel registration
 if jupyter kernelspec list | grep -q swift; then
     echo "✅ Kernel registration verified"
-    jupyter kernelspec list | grep swift
+    KERNEL_SPEC_DIR=$(jupyter kernelspec list | grep swift | awk '{print $2}')
+    echo "   Kernel location: $KERNEL_SPEC_DIR"
 else
     echo "❌ Error: Kernel registration failed"
     exit 1
 fi
+
+# Fix kernel.json to include PATH and HOME
+echo ""
+echo "🔧 Updating kernel.json with Swiftly PATH..."
+python3 << 'PYTHON_FIX_KERNEL'
+import json
+import os
+import subprocess
+
+# Find kernel.json location
+result = subprocess.run(['jupyter', 'kernelspec', 'list', '--json'],
+                       capture_output=True, text=True)
+kernels = json.loads(result.stdout)
+
+if 'swift' not in kernels['kernelspecs']:
+    print('  ❌ Swift kernel not found')
+    exit(1)
+
+kernel_json_path = os.path.join(kernels['kernelspecs']['swift']['resource_dir'], 'kernel.json')
+print(f'  Kernel config: {kernel_json_path}')
+
+# Read current kernel.json
+with open(kernel_json_path, 'r') as f:
+    kernel_config = json.load(f)
+
+# Get the current PATH from swiftly environment
+swiftly_env_script = os.path.expanduser('~/.local/share/swiftly/env.sh')
+if os.path.exists(swiftly_env_script):
+    result = subprocess.run(
+        ['bash', '-c', f'source {swiftly_env_script} && echo $PATH'],
+        capture_output=True, text=True
+    )
+    swift_path = result.stdout.strip()
+else:
+    # Fallback: construct PATH manually
+    swift_toolchain = kernel_config['env'].get('REPL_SWIFT_PATH', '')
+    if swift_toolchain:
+        swift_bin_dir = os.path.dirname(swift_toolchain)
+        swift_path = f"{swift_bin_dir}:{os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}"
+    else:
+        swift_path = os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')
+
+print(f'  Swift PATH: {swift_path[:100]}...')
+
+# Update kernel.json
+if 'env' not in kernel_config:
+    kernel_config['env'] = {}
+
+kernel_config['env']['PATH'] = swift_path
+kernel_config['env']['HOME'] = os.path.expanduser('~')
+
+# Write back
+with open(kernel_json_path, 'w') as f:
+    json.dump(kernel_config, f, indent=2)
+
+print('  ✅ Updated kernel.json with PATH and HOME')
+
+# Verify
+print('\n  Final kernel.json env section:')
+for key in ['PATH', 'HOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'REPL_SWIFT_PATH']:
+    if key in kernel_config['env']:
+        value = kernel_config['env'][key]
+        if len(value) > 80:
+            value = value[:77] + '...'
+        print(f'    {key}: {value}')
+PYTHON_FIX_KERNEL
+
+echo ""
+echo "✅ Kernel configuration updated"
+echo ""
 
 # Step 6: Create environment setup script
 echo ""
