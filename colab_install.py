@@ -131,8 +131,43 @@ def install_swift_jupyter():
     # Step 3: Install Swift
     print_step(f"Installing Swift {SWIFT_SNAPSHOT} (2-3 minutes)...")
 
-    run(f"{swiftly_bin}/swiftly install {SWIFT_SNAPSHOT} -y")
-    run(f"{swiftly_bin}/swiftly use {SWIFT_SNAPSHOT}")
+    # Try to install the specified snapshot, with fallbacks (snapshots only, not stable releases)
+    swift_installed = False
+    snapshots_to_try = [
+        SWIFT_SNAPSHOT,
+        f"{SWIFT_SNAPSHOT}a",      # Sometimes snapshots have 'a' suffix
+        "main-snapshot",           # Latest main snapshot
+        "6.1-snapshot",            # Release branch snapshot
+    ]
+
+    # First, let's see what swiftly can list
+    print("  Checking available toolchains...")
+    list_result = subprocess.run(
+        f"{swiftly_bin}/swiftly list-available --platform ubuntu2204",
+        shell=True, capture_output=True, text=True
+    )
+    if list_result.returncode == 0 and list_result.stdout:
+        print(f"  Available: {list_result.stdout[:300]}...")
+
+    for snapshot in snapshots_to_try:
+        try:
+            print(f"  Trying {snapshot}...")
+            result = subprocess.run(
+                f"{swiftly_bin}/swiftly install {snapshot} -y",
+                shell=True, capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                run(f"{swiftly_bin}/swiftly use {snapshot}")
+                swift_installed = True
+                print_success(f"Swift {snapshot} installed")
+                break
+            else:
+                print_warning(f"Failed to install {snapshot}: {result.stderr[:200] if result.stderr else 'unknown error'}")
+        except Exception as e:
+            print_warning(f"Failed to install {snapshot}: {e}")
+
+    if not swift_installed:
+        raise Exception("Failed to install any Swift version. Please check your internet connection and try again.")
 
     # Get Swift version and path
     swift_version = run("swift --version", capture=True).split('\n')[0]

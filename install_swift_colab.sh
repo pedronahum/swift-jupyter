@@ -136,10 +136,30 @@ if [ -f "$SWIFTLY_HOME/env.sh" ]; then
 fi
 
 # Step 3: Install Swift snapshot
-print_step "Installing Swift $SWIFT_SNAPSHOT (this may take 2-3 minutes)..."
+print_step "Installing Swift (this may take 2-3 minutes)..."
 
-swiftly install $SWIFT_SNAPSHOT -y > /dev/null 2>&1
-swiftly use $SWIFT_SNAPSHOT > /dev/null 2>&1
+# Check available toolchains
+echo "  Checking available toolchains..."
+swiftly list-available --platform ubuntu2204 2>/dev/null | head -10 || true
+
+# Try multiple snapshots with fallback (snapshots only, not stable releases)
+SWIFT_INSTALLED=false
+for snapshot in "$SWIFT_SNAPSHOT" "${SWIFT_SNAPSHOT}a" "main-snapshot" "6.1-snapshot"; do
+    echo "  Trying $snapshot..."
+    if swiftly install "$snapshot" -y 2>&1; then
+        swiftly use "$snapshot" 2>/dev/null
+        SWIFT_INSTALLED=true
+        print_success "Swift $snapshot installed"
+        break
+    else
+        print_warning "Failed to install $snapshot, trying next..."
+    fi
+done
+
+if [ "$SWIFT_INSTALLED" = false ]; then
+    print_error "Failed to install any Swift version"
+    exit 1
+fi
 
 # Verify Swift installation
 SWIFT_VERSION=$(swift --version 2>&1 | head -1)
