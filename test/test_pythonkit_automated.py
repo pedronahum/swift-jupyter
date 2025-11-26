@@ -51,7 +51,7 @@ def check_requirements():
     # Check matplotlib
     try:
         result = subprocess.run(
-            ['/usr/bin/python3', '-c', 'import matplotlib'],
+            [sys.executable, '-c', 'import matplotlib'],
             capture_output=True,
             check=True
         )
@@ -59,7 +59,7 @@ def check_requirements():
     except subprocess.CalledProcessError:
         print("⚠️  matplotlib not found. Installing...")
         subprocess.run(
-            ['/usr/bin/python3', '-m', 'pip', 'install', '--user', 'matplotlib', 'numpy'],
+            [sys.executable, '-m', 'pip', 'install', '--user', 'matplotlib', 'numpy'],
             check=True
         )
 

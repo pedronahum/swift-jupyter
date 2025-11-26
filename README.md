@@ -33,6 +33,15 @@ This kernel has been modernized and is now working with:
 - Modern SwiftPM Package Description 5.5+
 - Cross-platform dlopen support (Darwin/Glibc)
 
+✅ **Enhanced User Experience** (November 2025)
+- **Expression Value Display**: Automatic display of expression values (like Python notebooks)
+- **Magic Commands**: %help, %who, %reset, %timeit for interactive exploration
+- **Better Error Messages**: Pattern-matched error messages with actionable suggestions and documentation links
+- **Package Installation Progress**: Real-time progress indicators with step-by-step feedback
+  - Shows build timing and helpful troubleshooting tips
+  - Configurable timeout handling (default 10 minutes)
+  - Clear success messages with installed package names
+
 
 ✅ **Testing Infrastructure**
 - Modern pytest-based test suite
@@ -137,6 +146,30 @@ pip3 install jupyter ipykernel numpy pandas matplotlib
 git clone https://github.com/pedronahum/swift-jupyter.git
 cd swift-jupyter
 python3 register.py --user --swift-toolchain <path to swift toolchain>
+```
+
+#### Option 3: Ubuntu Virtual Environment (Recommended for Isolation)
+
+This method avoids installing packages globally and is safer for your system.
+
+**Prerequisites:**
+- Swift installed via [swiftly](https://github.com/swift-server/swiftly)
+- `python3-venv` package (`sudo apt install python3-venv`)
+
+```bash
+# 1. Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install Jupyter and dependencies
+pip install jupyter ipykernel matplotlib numpy pandas
+
+# 3. Register the kernel
+# Note: Locate your toolchain path (e.g., ~/.local/share/swiftly/toolchains/<version>)
+python3 register.py --sys-prefix --swift-toolchain ~/.local/share/swiftly/toolchains/6.2.1
+
+# 4. Start Jupyter
+jupyter notebook
 ```
 
 ### Verifying Installation
@@ -485,7 +518,8 @@ This project was **originally created by Google** in 2018-2019 as part of the Sw
 - Enhanced testing infrastructure
 - Updated documentation
 
-**Original Repository**: https://github.com/google/swift-jupyter
+**Original Repository**: https://github.com/google/swift-jupyter (archived)
+**Active Fork**: https://github.com/pedronahum/swift-jupyter
 
 ## License
 

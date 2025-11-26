@@ -58,6 +58,13 @@ def linux_pythonpath(root):
     if os.path.isdir(generic_dist) and os.path.isdir(os.path.join(generic_dist, 'lldb')):
         return generic_dist
 
+    # Try local/lib (common in some toolchain builds)
+    local_dist = '%s/local/lib/python%d.%d/dist-packages' % (root,
+                                                              sys.version_info[0],
+                                                              sys.version_info[1])
+    if os.path.isdir(local_dist) and os.path.isdir(os.path.join(local_dist, 'lldb')):
+        return local_dist
+
     # For Swiftly toolchains, check if lldb is installed system-wide
     # This happens when using python3-lldb package
     system_lldb_paths = [
@@ -99,8 +106,14 @@ def make_kernel_env(args):
         if platform.system() == 'Linux':
             # Find LLDB Python bindings (might be in toolchain or system-wide)
             kernel_env['PYTHONPATH'] = linux_pythonpath(args.swift_toolchain + '/usr')
+            kernel_env['SWIFT_TOOLCHAIN_ROOT'] = args.swift_toolchain
 
-            kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/linux' % args.swift_toolchain
+            # kernel_env['LD_LIBRARY_PATH'] = '%s/usr/lib/swift/linux' % args.swift_toolchain
+            
+            # Add host compiler libs if they exist (needed for lib_CompilerSwiftIDEUtils.so)
+            # host_compiler_libs = '%s/usr/lib/swift/host/compiler' % args.swift_toolchain
+            # if os.path.isdir(host_compiler_libs):
+            #    kernel_env['LD_LIBRARY_PATH'] += ':' + host_compiler_libs
 
             # Try to find repl_swift in multiple locations
             # 1. In toolchain usr/bin
@@ -310,16 +323,17 @@ def validate_kernel_env(kernel_env, validate_only=False):
     if validate_only and 'PYTHON_LIBRARY' in kernel_env:
         print(f'  ✅ Python library found at {kernel_env["PYTHON_LIBRARY"]}')
 
-    lib_paths = kernel_env['LD_LIBRARY_PATH'].split(':') if platform.system() != 'Windows' else \
-                                                            kernel_env['LD_LIBRARY_PATH'].split(';') # ':' proceeds after drive letter in Windows
-    for index, lib_path in enumerate(lib_paths):
-        if os.path.isdir(lib_path):
-            continue
-        # First LD_LIBRARY_PATH should contain the swift toolchain libs.
-        if index == 0:
-            raise Exception('swift libs not found at %s' % lib_path)
-        # Other LD_LIBRARY_PATHs may be appended for other libs.
-        raise Exception('shared lib dir not found at %s' % lib_path)
+    if 'LD_LIBRARY_PATH' in kernel_env:
+        lib_paths = kernel_env['LD_LIBRARY_PATH'].split(':') if platform.system() != 'Windows' else \
+                                                                kernel_env['LD_LIBRARY_PATH'].split(';') # ':' proceeds after drive letter in Windows
+        for index, lib_path in enumerate(lib_paths):
+            if os.path.isdir(lib_path):
+                continue
+            # First LD_LIBRARY_PATH should contain the swift toolchain libs.
+            if index == 0:
+                raise Exception('swift libs not found at %s' % lib_path)
+            # Other LD_LIBRARY_PATHs may be appended for other libs.
+            raise Exception('shared lib dir not found at %s' % lib_path)
 
     if validate_only:
         print('✅ All validation checks passed!')
@@ -405,6 +419,10 @@ def parse_args():
     swift_locations.add_argument(
         '--xcode-path',
         help='Path to Xcode app bundle')
+    swift_locations.add_argument(
+        '--use-swiftly-toolchain',
+        action='store_true',
+        help='Use the currently active Swiftly toolchain')
 
     python_locations = parser.add_mutually_exclusive_group()
     python_locations.add_argument(
@@ -439,6 +457,29 @@ def parse_args():
         help='(R2-T3) validate the Swift/LLDB installation without registering the kernel')
 
     args = parser.parse_args()
+    
+    if args.use_swiftly_toolchain:
+        # Resolve Swiftly toolchain
+        import subprocess
+        try:
+            result = subprocess.run(['swiftly', 'use'], capture_output=True, text=True, check=True)
+            toolchain_name = result.stdout.strip().split(' ')[0] # e.g. "main-snapshot-2025-11-03 (default)" -> "main-snapshot-2025-11-03"
+            
+            # Construct path (assuming default Swiftly location)
+            home = os.path.expanduser("~")
+            toolchain_path = os.path.join(home, ".local/share/swiftly/toolchains", toolchain_name)
+            
+            if not os.path.isdir(toolchain_path):
+                raise Exception(f"Swiftly toolchain path not found: {toolchain_path}")
+                
+            args.swift_toolchain = toolchain_path
+            print(f"Using Swiftly toolchain: {toolchain_name} at {toolchain_path}")
+            
+        except subprocess.CalledProcessError:
+            raise Exception("Failed to run 'swiftly use'. Is swiftly installed?")
+        except Exception as e:
+            raise Exception(f"Error resolving Swiftly toolchain: {e}")
+
     if args.sys_prefix:
         args.prefix = sys.prefix
     if args.swift_toolchain is not None:

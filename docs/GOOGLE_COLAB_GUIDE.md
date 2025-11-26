@@ -11,10 +11,22 @@ This guide shows you how to install and use the Swift Jupyter kernel in Google C
 
 ### Step 2: Run Installation Script
 
+**Option A: Shell Script (Recommended)**
+
 Copy and paste this into a code cell and run it:
 
 ```bash
-!curl -s https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
+!curl -sL https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/install_swift_colab.sh | bash
+```
+
+**Option B: Python Script**
+
+If you prefer Python or the shell script doesn't work:
+
+```python
+!pip install -q requests
+import urllib.request
+exec(urllib.request.urlopen('https://raw.githubusercontent.com/pedronahum/swift-jupyter/main/colab_install.py').read().decode())
 ```
 
 **Installation time**: ~3-5 minutes

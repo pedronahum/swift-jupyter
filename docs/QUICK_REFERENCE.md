@@ -1,6 +1,6 @@
 # Swift-Jupyter Modernization - Quick Reference
 
-**Date**: October 17, 2025 | **Status**: 72% Complete | **Next**: Region R2
+**Date**: November 25, 2025 | **Status**: Feature Complete | **Latest**: UX Improvements
 
 ---
 
@@ -8,12 +8,16 @@
 
 ### Completed Regions ✅
 - **R1**: Foundation & Dependencies (Python 3.9-3.12, modern Jupyter stack)
+- **R2**: Kernel Registration (interrupt_mode: message, validation)
 - **R3**: Core Kernel Protocol (Protocol 5.4, interrupts, Unicode)
 - **R4**: Display Layer (Python helpers ready, Swift migration documented)
 - **R5**: LLDB Shell Integration (Unicode, enhanced interrupts, better errors)
 
-### Next Up ⏳
-- **R2**: Kernel Registration (add interrupt_mode: message to kernel.json)
+### November 2025 Enhancements ✅
+- **Expression Value Display**: Auto-display like Python notebooks
+- **Magic Commands**: %help, %who, %reset, %timeit
+- **Better Error Messages**: 10 pattern-matched error types with suggestions
+- **Package Installation Progress**: Real-time feedback with 5 steps
 
 ---
 
@@ -51,17 +55,21 @@ python3 -m py_compile swift_kernel.py
 pip3 list | grep -E "jupyter|ipykernel"
 ```
 
-### Next Steps (R2)
-```bash
-# View R2 plan
-cat modernization-plan.json | jq '.regions.R2'
+### Magic Commands (in notebook cells)
+```swift
+%help           # Show all available commands
+%who            # List variables in scope
+%reset          # Reset Swift REPL (clear state)
+%timeit <code>  # Time code execution
+```
 
-# Check current kernel registration
-jupyter kernelspec list
-cat $(jupyter --data-dir)/kernels/swift/kernel.json
+### Package Installation
+```swift
+# Install a package
+%install '.package(url: "https://github.com/author/Package", from: "1.0.0")' PackageName
 
-# Start editing register.py
-open register.py
+# Set build timeout (10 minutes = 600 seconds by default)
+export SWIFT_JUPYTER_BUILD_TIMEOUT=1200  # 20 minutes
 ```
 
 ### Run Tests
@@ -89,6 +97,19 @@ python3 -m py_compile swift_kernel.py
 
 ## 🎯 What Changed in swift_kernel.py
 
+### November 2025 Changes
+
+| Lines | Feature | Description |
+|-------|---------|-------------|
+| 84-115 | `get_formatted_value()` | Expression value display |
+| 199-293 | `get_helpful_message()` | Better error messages (10 patterns) |
+| 601-634 | LSP auto-detection | Find sourcekit-lsp automatically |
+| 1010-1222 | Magic commands | %help, %who, %reset, %timeit |
+| 1406-1411 | `_send_install_progress()` | Progress indicator helper |
+| 1412-1773 | `_install_packages()` | Progress, timeouts, better errors |
+
+### Earlier Modernization (R1-R5)
+
 | Lines | Feature | Description | Region |
 |-------|---------|-------------|--------|
 | 100-159 | `SwiftError` enhanced | Error classification, cleaned messages | R5 |
@@ -102,8 +123,6 @@ python3 -m py_compile swift_kernel.py
 | 1065-1105 | `_execute()` enhanced | Unicode handling, error catching | R5 |
 | 1207-1279 | `do_complete()` | Unicode-aware completion | R3 |
 | 1286-1325 | `_get_pretty_main_thread_stack_trace()` | Better formatting | R5 |
-
-**Total**: +459 lines added across R3, R4, and R5
 
 ---
 
@@ -127,31 +146,43 @@ python3 -m py_compile swift_kernel.py
 
 ## 📖 Read These First
 
-1. **[MODERNIZATION_STATUS.md](MODERNIZATION_STATUS.md)** - Overall progress
-2. **[SESSION_SUMMARY.md](SESSION_SUMMARY.md)** - Latest session work
-3. **[R3_COMPLETION_REPORT.md](R3_COMPLETION_REPORT.md)** - Protocol 5.4 details
-4. **[R4_COMPLETION_REPORT.md](R4_COMPLETION_REPORT.md)** - Display layer details
+1. **[IMPROVEMENTS_NOVEMBER_2025.md](IMPROVEMENTS_NOVEMBER_2025.md)** - Latest enhancements (November 2025)
+2. **[CHANGELOG.md](CHANGELOG.md)** - Complete change history
+3. **[MODERNIZATION_STATUS.md](MODERNIZATION_STATUS.md)** - Overall progress
+4. **[R3_COMPLETION_REPORT.md](R3_COMPLETION_REPORT.md)** - Protocol 5.4 details
 
 ---
 
-## 🔧 Recommended Next Action
+## 🔧 What's New (November 2025)
 
-**Complete Region R2 (Kernel Registration)**
+### Expression Value Display
+```swift
+let x = 42
+x  // automatically displays: 42
+```
 
-**Why**: Required to test R3 message-based interrupts
+### Magic Commands
+```swift
+%help     // Shows all commands
+%timeit [1,2,3].map { $0 * 2 }  // Times execution
+```
 
-**Tasks**:
-1. Add LLDB validation to register.py
-2. Update kernel.json with `"interrupt_mode": "message"`
-3. Add `--validate-only` flag
+### Better Error Messages
+Errors now include:
+- 💡 Actionable suggestions
+- 📖 Documentation links
+- Common fixes for the specific error
 
-**Effort**: 2-3 hours | **Risk**: Low
-
-**Command to start**:
-```bash
-cat modernization-plan.json | jq '.regions.R2.tasks'
+### Package Installation Progress
+```
+[1/5] 📋 Creating Package.swift
+[2/5] 🌐 Resolving and fetching dependencies
+[3/5] 🔨 Building packages...
+[4/5] 📦 Copying Swift modules to kernel...
+[5/5] 🔗 Loading packages into Swift REPL...
+✅ Successfully installed: PackageName
 ```
 
 ---
 
-**Status**: 🟢 Ready for R2 | **Progress**: 72% | **Risk**: Low
+**Status**: 🟢 Feature Complete | **Progress**: 100% | **Last Update**: November 2025

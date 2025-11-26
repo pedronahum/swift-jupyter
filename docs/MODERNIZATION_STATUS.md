@@ -441,8 +441,8 @@ R7 (Docker) ⏳ ← OPTIONAL
 
 ## Contact & Support
 
-- **Repository**: https://github.com/google/swift-jupyter
-- **Issue Tracker**: https://github.com/google/swift-jupyter/issues
+- **Repository**: https://github.com/pedronahum/swift-jupyter
+- **Issue Tracker**: https://github.com/pedronahum/swift-jupyter/issues
 - **Swift Documentation**: https://docs.swift.org
 - **Jupyter Protocol**: https://jupyter-client.readthedocs.io/en/latest/messaging.html
 

@@ -1,5 +1,101 @@
 # Changelog
 
+## November 2025 - Enhanced User Experience
+
+### Overview
+
+Major improvements focused on making the Swift Jupyter experience more intuitive and user-friendly. See [IMPROVEMENTS_NOVEMBER_2025.md](IMPROVEMENTS_NOVEMBER_2025.md) for detailed documentation.
+
+### New Features
+
+#### 1. Expression Value Display
+- Automatic display of expression values like Python notebooks
+- No need to explicitly call `print()` for simple expressions
+- Example: typing `42` in a cell displays `42` as output
+
+#### 2. Magic Commands
+- `%help` - Display available commands and tips
+- `%who` - List variables defined in the session
+- `%reset` - Reset the Swift REPL (clear all state)
+- `%timeit <code>` - Time the execution of Swift code
+
+#### 3. Better Error Messages
+Pattern-matched error messages with actionable suggestions for 10 common Swift errors:
+- Immutable variable assignment (`let` vs `var`)
+- Type mismatches and conversions
+- Optional unwrapping
+- Missing return statements
+- Undefined variables/functions
+- Missing modules with install hints
+- Protocol conformance
+- Access control issues
+- Closure syntax
+- Initializer problems
+
+Each error includes documentation links and concrete suggestions.
+
+#### 4. Package Installation Progress
+Real-time feedback during package installation:
+```
+📦 Installing Swift Packages
+[1/5] 📋 Creating Package.swift
+[2/5] 🌐 Resolving and fetching dependencies
+[3/5] 🔨 Building packages...
+[4/5] 📦 Copying Swift modules to kernel...
+[5/5] 🔗 Loading packages into Swift REPL...
+✓ Build completed in 12.3s
+✅ Successfully installed: PackageName
+```
+
+Enhanced error messages with troubleshooting tips for:
+- Missing configuration
+- Build failures
+- Network timeouts
+- Module copy failures
+- dlopen failures
+
+Configurable timeout via `SWIFT_JUPYTER_BUILD_TIMEOUT` environment variable (default: 600 seconds).
+
+### Bug Fixes
+
+1. **Fixed `process.is_alive` AttributeError**
+   - Changed to use LLDB's correct `IsValid()` API
+
+2. **Fixed Exception Re-raise Crashes**
+   - Exception handlers now gracefully return error messages instead of crashing the kernel
+
+3. **Fixed Bare Exception Handlers**
+   - Replaced `except:` with specific exception types
+
+### LSP Improvements
+
+- Auto-detection of sourcekit-lsp in PATH, relative to swift compiler, and common swiftly locations
+- Added diagnostics callback support for future IDE integration
+
+### Files Changed
+
+- `swift_kernel.py` - Major enhancements (magic commands, error messages, value display, progress)
+- `lsp_client.py` - Diagnostics callback support
+- `README.md` - Updated with new features
+
+### Files Added
+
+- `docs/IMPROVEMENTS_NOVEMBER_2025.md` - Comprehensive documentation
+- `PACKAGE_INSTALL_IMPROVEMENTS.md` - Package installation details
+- `test_expression_values.py` - Expression display tests
+- `test_error_messages.py` - Error message tests
+- `test_magic_commands.py` - Magic command tests
+- `test_package_install.py` - Installation progress tests
+- `test_install_error_handling.py` - Error handling tests
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SWIFT_JUPYTER_BUILD_TIMEOUT` | 600 | Build timeout in seconds |
+
+---
+
 ## Recent Changes (October 2024)
 
 ### PythonKit Support for matplotlib ✅

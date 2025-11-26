@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+Swift Jupyter Kernel Installer for Google Colab
+
+This script can be run directly in a Colab notebook to install Swift and the
+Swift Jupyter kernel.
+
+Usage in Colab (Python cell):
+    !pip install -q requests
+    exec(open('/content/colab_install.py').read())
+
+Or:
+    import urllib.request
+    exec(urllib.request.urlopen('https://raw.githubusercontent.com/YOUR_REPO/swift-jupyter/main/colab_install.py').read().decode())
+"""
+
+import os
+import subprocess
+import sys
+import json
+import shutil
+from pathlib import Path
+
+# Configuration
+SWIFT_SNAPSHOT = "main-snapshot"
+SWIFT_JUPYTER_REPO = "https://github.com/pedronahum/swift-jupyter.git"
+SWIFT_JUPYTER_BRANCH = "main"
+INSTALL_DIR = "/content/swift-jupyter"
+
+
+def run(cmd, check=True, capture=False, shell=True):
+    """Run a command and optionally capture output."""
+    if capture:
+        result = subprocess.run(cmd, shell=shell, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            print(f"Command failed: {cmd}")
+            print(f"stderr: {result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, cmd)
+        return result.stdout.strip()
+    else:
+        subprocess.run(cmd, shell=shell, check=check)
+
+
+def print_step(msg):
+    print(f"\n\033[94m==>\033[0m {msg}")
+
+
+def print_success(msg):
+    print(f"\033[92m✓\033[0m {msg}")
+
+
+def print_warning(msg):
+    print(f"\033[93m⚠\033[0m {msg}")
+
+
+def print_error(msg):
+    print(f"\033[91m✗\033[0m {msg}")
+
+
+def install_swift_jupyter():
+    """Main installation function."""
+
+    print("\n" + "="*70)
+    print("     Swift Jupyter Kernel Installation for Google Colab")
+    print("="*70 + "\n")
+
+    # Step 1: Install system dependencies
+    print_step("Installing system dependencies...")
+
+    packages = [
+        "binutils", "git", "gnupg2", "libc6-dev", "libcurl4-openssl-dev",
+        "libedit2", "libgcc-11-dev", "libncurses6", "libpython3-dev",
+        "libsqlite3-0", "libstdc++-11-dev", "libxml2-dev", "libz3-dev",
+        "pkg-config", "tzdata", "unzip", "zlib1g-dev"
+    ]
+
+    run("apt-get update -qq", check=False)
+    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
+
+    # Install LLDB Python bindings
+    for version in [18, 17, 16, 15, 14]:
+        result = subprocess.run(
+            f"apt-get install -y -qq python3-lldb-{version}",
+            shell=True, capture_output=True
+        )
+        if result.returncode == 0:
+            print_success(f"Installed python3-lldb-{version}")
+            break
+
+    print_success("System dependencies installed")
+
+    # Step 2: Install Swiftly
+    print_step("Installing Swiftly...")
+
+    swiftly_path = os.path.expanduser("~/.local/share/swiftly/bin/swiftly")
+    if not os.path.exists(swiftly_path):
+        run("curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y")
+        print_success("Swiftly installed")
+    else:
+        print_success("Swiftly already installed")
+
+    # Add to PATH
+    swiftly_bin = os.path.expanduser("~/.local/share/swiftly/bin")
+    os.environ["PATH"] = f"{swiftly_bin}:{os.environ['PATH']}"
+
+    # Step 3: Install Swift
+    print_step("Installing Swift development snapshot (2-3 minutes)...")
+
+    try:
+        run(f"{swiftly_bin}/swiftly install {SWIFT_SNAPSHOT} -y")
+        run(f"{swiftly_bin}/swiftly use {SWIFT_SNAPSHOT}")
+    except:
+        print_warning("Failed with main-snapshot, trying specific version...")
+        run(f"{swiftly_bin}/swiftly install main-snapshot-2025-11-03 -y")
+        run(f"{swiftly_bin}/swiftly use main-snapshot-2025-11-03")
+
+    # Get Swift version and path
+    swift_version = run("swift --version", capture=True).split('\n')[0]
+    swift_path = run("which swift", capture=True)
+    swift_toolchain = str(Path(swift_path).parent.parent)
+
+    print_success(f"Swift installed: {swift_version}")
+
+    # Step 4: Clone swift-jupyter
+    print_step("Setting up Swift Jupyter kernel...")
+
+    if os.path.exists(INSTALL_DIR):
+        shutil.rmtree(INSTALL_DIR)
+
+    run(f"git clone --depth 1 -b {SWIFT_JUPYTER_BRANCH} {SWIFT_JUPYTER_REPO} {INSTALL_DIR}")
+    print_success("Repository cloned")
+
+    # Step 5: Install Python dependencies
+    print_step("Installing Python dependencies...")
+    run("pip install -q jupyter ipykernel jupyter_client")
+    print_success("Python dependencies installed")
+
+    # Step 6: Find LLDB Python path
+    print_step("Configuring LLDB Python bindings...")
+
+    lldb_python_path = None
+    candidates = [
+        "/usr/lib/python3/dist-packages",
+        f"/usr/lib/llvm-18/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
+        f"/usr/lib/llvm-17/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
+        f"/usr/lib/llvm-16/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
+        f"/usr/lib/llvm-15/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
+    ]
+
+    for candidate in candidates:
+        if os.path.isdir(os.path.join(candidate, "lldb")):
+            lldb_python_path = candidate
+            break
+
+    if not lldb_python_path:
+        lldb_python_path = "/usr/lib/python3/dist-packages"
+        print_warning(f"Could not find LLDB, defaulting to {lldb_python_path}")
+    else:
+        print_success(f"LLDB Python path: {lldb_python_path}")
+
+    # Step 7: Register kernel
+    print_step("Registering Swift Jupyter kernel...")
+
+    kernel_dir = "/usr/local/share/jupyter/kernels/swift"
+    os.makedirs(kernel_dir, exist_ok=True)
+
+    kernel_json = {
+        "argv": [
+            sys.executable,
+            "-m", "swift_kernel",
+            "-f", "{connection_file}"
+        ],
+        "display_name": "Swift",
+        "language": "swift",
+        "env": {
+            "PYTHONPATH": f"{lldb_python_path}:{INSTALL_DIR}",
+            "REPL_SWIFT_PATH": f"{swift_toolchain}/bin/repl_swift",
+            "SWIFT_BUILD_PATH": f"{swift_toolchain}/bin/swift-build",
+            "SWIFT_PACKAGE_PATH": f"{swift_toolchain}/bin/swift-package",
+            "PATH": f"{swift_toolchain}/bin:{swiftly_bin}:{os.environ['PATH']}",
+            "LD_LIBRARY_PATH": f"{swift_toolchain}/lib/swift/linux"
+        },
+        "interrupt_mode": "message"
+    }
+
+    with open(os.path.join(kernel_dir, "kernel.json"), "w") as f:
+        json.dump(kernel_json, f, indent=2)
+
+    print_success("Swift kernel registered")
+
+    # Step 8: Verify
+    print_step("Verifying installation...")
+
+    result = run("jupyter kernelspec list", capture=True)
+    if "swift" in result:
+        print_success("Swift kernel found in Jupyter")
+    else:
+        print_error("Swift kernel not found")
+
+    # Step 9: Create test notebook
+    print_step("Creating test notebook...")
+
+    test_notebook = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": ["# Swift Test Notebook\n", "Test the Swift kernel installation."]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": ['print("Hello from Swift!")']
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "let numbers = [1, 2, 3, 4, 5]\n",
+                    "let sum = numbers.reduce(0, +)\n",
+                    'print("Sum: \\(sum)")'
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": ["%swift-version"]
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Swift",
+                "language": "swift",
+                "name": "swift"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 4
+    }
+
+    with open("/content/swift_test.ipynb", "w") as f:
+        json.dump(test_notebook, f, indent=2)
+
+    print_success("Test notebook created at /content/swift_test.ipynb")
+
+    # Final message
+    print("\n" + "="*70)
+    print("                    Installation Complete!")
+    print("="*70)
+    print("""
+    Next Steps:
+
+    1. RESTART THE RUNTIME
+       Runtime → Restart runtime
+
+    2. Change runtime type to Swift:
+       Runtime → Change runtime type → Swift
+
+    3. Or open /content/swift_test.ipynb
+
+    Swift: """ + swift_version + """
+    Kernel: /usr/local/share/jupyter/kernels/swift
+    """)
+    print("="*70 + "\n")
+
+    return True
+
+
+if __name__ == "__main__":
+    try:
+        install_swift_jupyter()
+    except Exception as e:
+        print_error(f"Installation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

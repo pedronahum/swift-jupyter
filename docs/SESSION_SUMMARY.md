@@ -347,10 +347,10 @@ Total: 3/7 regions complete + 1 partial = 60%
 
 ## Contact & Resources
 
-- **Repository**: https://github.com/google/swift-jupyter
+- **Repository**: https://github.com/pedronahum/swift-jupyter
 - **Jupyter Protocol**: https://jupyter-client.readthedocs.io/en/latest/messaging.html
 - **Swift Documentation**: https://docs.swift.org
-- **Issue Tracker**: https://github.com/google/swift-jupyter/issues
+- **Issue Tracker**: https://github.com/pedronahum/swift-jupyter/issues
 
 ---
 
