@@ -230,12 +230,52 @@ fi
 
 print_success "LLDB Python path: $LLDB_PYTHON_PATH"
 
-# Test LLDB import
-echo "  Testing LLDB import..."
-if PYTHONPATH="$LLDB_PYTHON_PATH" python3 -c "import lldb; print('LLDB loaded:', lldb.__file__)" 2>/dev/null; then
-    print_success "LLDB import successful"
+# Test LLDB import AND debugger creation (this is what the kernel does)
+echo "  Testing LLDB import and debugger creation..."
+LLDB_TEST_RESULT=$(timeout 30 python3 << LLDB_TEST_EOF
+import sys
+import os
+sys.path.insert(0, "$LLDB_PYTHON_PATH")
+
+# Set LD_LIBRARY_PATH for Swift libs
+os.environ["LD_LIBRARY_PATH"] = "$SWIFT_TOOLCHAIN/lib/swift/linux:$SWIFT_TOOLCHAIN/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+
+import lldb
+print(f"LLDB module: {lldb.__file__}")
+
+# Test creating a debugger (this is what hangs if LLDB is misconfigured)
+debugger = lldb.SBDebugger.Create()
+if debugger:
+    print("SBDebugger.Create() succeeded")
+    debugger.SetAsync(False)
+
+    # Test creating a target with repl_swift
+    repl_swift = "$SWIFT_TOOLCHAIN/bin/repl_swift"
+    if os.path.exists(repl_swift):
+        import platform
+        arch = platform.machine()
+        target = debugger.CreateTargetWithFileAndArch(repl_swift, arch)
+        if target:
+            print(f"Target created successfully for {repl_swift}")
+        else:
+            print(f"WARNING: Could not create target for {repl_swift}")
+    else:
+        print(f"WARNING: repl_swift not found at {repl_swift}")
+
+    lldb.SBDebugger.Destroy(debugger)
+    print("Debugger destroyed successfully")
+else:
+    print("ERROR: SBDebugger.Create() returned None")
+    sys.exit(1)
+LLDB_TEST_EOF
+2>&1)
+
+if [ $? -eq 0 ]; then
+    print_success "LLDB debugger test passed"
+    echo "$LLDB_TEST_RESULT" | while read line; do echo "    $line"; done
 else
-    print_warning "LLDB import test failed"
+    print_warning "LLDB debugger test failed or timed out:"
+    echo "$LLDB_TEST_RESULT" | head -10
 fi
 
 # Step 7: Register the Swift kernel
@@ -271,7 +311,8 @@ cat > "$KERNEL_DIR/kernel.json" << EOF
     "SWIFT_PACKAGE_PATH": "$SWIFT_PACKAGE_PATH",
     "PATH": "$SWIFT_TOOLCHAIN/bin:$PATH",
     "LD_LIBRARY_PATH": "$LD_LIB_PATH",
-    "SWIFT_TOOLCHAIN": "$SWIFT_TOOLCHAIN"
+    "SWIFT_TOOLCHAIN": "$SWIFT_TOOLCHAIN",
+    "SWIFT_TOOLCHAIN_ROOT": "$SWIFT_TOOLCHAIN"
   },
   "interrupt_mode": "message"
 }
@@ -286,14 +327,6 @@ python3 register.py --sys-prefix --swift-toolchain "$SWIFT_TOOLCHAIN" > /dev/nul
 
 print_success "Swift kernel registered"
 
-# Test kernel import
-echo "  Testing kernel import..."
-if PYTHONPATH="$LLDB_PYTHON_PATH:$INSTALL_DIR" LD_LIBRARY_PATH="$LD_LIB_PATH" python3 -c "import swift_kernel; print('Kernel module loaded')" 2>/dev/null; then
-    print_success "Kernel import test passed"
-else
-    print_warning "Kernel import test failed"
-fi
-
 # Step 8: Verify installation
 print_step "Verifying installation..."
 
@@ -302,6 +335,33 @@ if jupyter kernelspec list 2>/dev/null | grep -q swift; then
     print_success "Swift kernel found in Jupyter"
 else
     print_error "Swift kernel not found - registration may have failed"
+fi
+
+# Test repl_swift binary
+REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN/bin/repl_swift"
+echo "  Checking repl_swift binary..."
+if [ -f "$REPL_SWIFT_PATH" ]; then
+    print_success "repl_swift found at $REPL_SWIFT_PATH"
+    if [ -x "$REPL_SWIFT_PATH" ]; then
+        print_success "repl_swift is executable"
+    else
+        print_warning "repl_swift is not executable"
+    fi
+else
+    print_error "repl_swift NOT found at $REPL_SWIFT_PATH"
+    # Try to find it elsewhere
+    ALT_PATH="$SWIFT_TOOLCHAIN/usr/bin/repl_swift"
+    if [ -f "$ALT_PATH" ]; then
+        print_warning "Found repl_swift at alternative location: $ALT_PATH"
+    fi
+fi
+
+# Test kernel import
+echo "  Testing kernel import..."
+if PYTHONPATH="$LLDB_PYTHON_PATH:$INSTALL_DIR" LD_LIBRARY_PATH="$LD_LIB_PATH" python3 -c "import swift_kernel; print('Kernel module loaded')" 2>/dev/null; then
+    print_success "Kernel import test passed"
+else
+    print_warning "Kernel import test failed"
 fi
 
 # Step 9: Create test notebook
@@ -451,6 +511,9 @@ echo "╠═══════════════════════�
 echo "║  Swift: $SWIFT_VERSION"
 echo "║  Kernel: /usr/local/share/jupyter/kernels/swift                      ║"
 echo "║  Test notebook: /content/swift_test.ipynb                            ║"
+echo "╠══════════════════════════════════════════════════════════════════════╣"
+echo "║  Troubleshooting:                                                    ║"
+echo "║  If kernel hangs, check: !cat /tmp/swift-kernel.log                  ║"
 echo "╚══════════════════════════════════════════════════════════════════════╝"
 echo ""
 

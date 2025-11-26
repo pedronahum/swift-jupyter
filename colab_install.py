@@ -226,16 +226,56 @@ def install_swift_jupyter():
     else:
         print_success(f"LLDB Python path: {lldb_python_path}")
 
-    # Verify LLDB can be imported
-    print("  Testing LLDB import...")
+    # Verify LLDB can be imported AND create a debugger (this is what the kernel does)
+    print("  Testing LLDB import and debugger creation...")
+    lldb_test_script = f'''
+import sys
+import os
+sys.path.insert(0, "{lldb_python_path}")
+
+# Set LD_LIBRARY_PATH for Swift libs
+os.environ["LD_LIBRARY_PATH"] = "{swift_toolchain}/lib/swift/linux:{swift_toolchain}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+
+import lldb
+print(f"LLDB module: {{lldb.__file__}}")
+
+# Test creating a debugger (this is what hangs if LLDB is misconfigured)
+debugger = lldb.SBDebugger.Create()
+if debugger:
+    print("SBDebugger.Create() succeeded")
+    debugger.SetAsync(False)
+
+    # Test creating a target with repl_swift
+    repl_swift = "{swift_toolchain}/bin/repl_swift"
+    if os.path.exists(repl_swift):
+        import platform
+        arch = platform.machine()
+        target = debugger.CreateTargetWithFileAndArch(repl_swift, arch)
+        if target:
+            print(f"Target created successfully for {{repl_swift}}")
+        else:
+            print(f"WARNING: Could not create target for {{repl_swift}}")
+    else:
+        print(f"WARNING: repl_swift not found at {{repl_swift}}")
+
+    lldb.SBDebugger.Destroy(debugger)
+    print("Debugger destroyed successfully")
+else:
+    print("ERROR: SBDebugger.Create() returned None")
+    sys.exit(1)
+'''
     test_result = subprocess.run(
-        f'PYTHONPATH="{lldb_python_path}" python3 -c "import lldb; print(lldb.__file__)"',
-        shell=True, capture_output=True, text=True
+        ['python3', '-c', lldb_test_script],
+        capture_output=True, text=True, timeout=30
     )
     if test_result.returncode == 0:
-        print_success(f"LLDB import successful: {test_result.stdout.strip()}")
+        print_success(f"LLDB debugger test passed")
+        for line in test_result.stdout.strip().split('\n'):
+            print(f"    {line}")
     else:
-        print_warning(f"LLDB import failed: {test_result.stderr[:100]}")
+        print_warning(f"LLDB debugger test failed:")
+        print(f"    stdout: {test_result.stdout[:300]}")
+        print(f"    stderr: {test_result.stderr[:300]}")
 
     # Step 7: Register kernel
     print_step("Registering Swift Jupyter kernel...")
@@ -266,7 +306,8 @@ def install_swift_jupyter():
             "SWIFT_PACKAGE_PATH": f"{swift_toolchain}/bin/swift-package",
             "PATH": f"{swift_toolchain}/bin:{swiftly_bin}:{os.environ['PATH']}",
             "LD_LIBRARY_PATH": ld_library_path,
-            "SWIFT_TOOLCHAIN": swift_toolchain
+            "SWIFT_TOOLCHAIN": swift_toolchain,
+            "SWIFT_TOOLCHAIN_ROOT": swift_toolchain  # Used by kernel for pre-loading libs
         },
         "interrupt_mode": "message"
     }
@@ -289,6 +330,28 @@ def install_swift_jupyter():
         print_success("Swift kernel found in Jupyter")
     else:
         print_error("Swift kernel not found")
+
+    # Test repl_swift binary exists and is executable
+    repl_swift_path = f"{swift_toolchain}/bin/repl_swift"
+    print(f"  Checking repl_swift binary...")
+    if os.path.exists(repl_swift_path):
+        print_success(f"repl_swift found at {repl_swift_path}")
+        # Check if it's executable
+        if os.access(repl_swift_path, os.X_OK):
+            print_success("repl_swift is executable")
+        else:
+            print_warning("repl_swift is not executable")
+    else:
+        print_error(f"repl_swift NOT found at {repl_swift_path}")
+        # Try to find it elsewhere
+        alt_paths = [
+            f"{swift_toolchain}/usr/bin/repl_swift",
+            os.path.expanduser("~/.local/share/swiftly/bin/repl_swift"),
+        ]
+        for alt in alt_paths:
+            if os.path.exists(alt):
+                print_warning(f"Found repl_swift at alternative location: {alt}")
+                break
 
     # Test kernel import
     print("  Testing kernel import...")
@@ -373,6 +436,10 @@ print('Kernel module loaded successfully')
 
     Swift: """ + swift_version + """
     Kernel: /usr/local/share/jupyter/kernels/swift
+
+    Troubleshooting:
+    If the kernel hangs or fails to start, check the log file:
+        !cat /tmp/swift-kernel.log
     """)
     print("="*70 + "\n")
 

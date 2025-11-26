@@ -1099,49 +1099,82 @@ class SwiftKernel(Kernel):
         return '\n'.join(lines)
 
     def _init_repl_process(self):
+        self.log.info('=== Starting REPL process initialization ===')
+        self.log.info(f'SWIFT_TOOLCHAIN_ROOT: {os.environ.get("SWIFT_TOOLCHAIN_ROOT", "NOT SET")}')
+        self.log.info(f'REPL_SWIFT_PATH: {os.environ.get("REPL_SWIFT_PATH", "NOT SET")}')
+        self.log.info(f'LD_LIBRARY_PATH: {os.environ.get("LD_LIBRARY_PATH", "NOT SET")}')
+        self.log.info(f'PYTHONPATH: {os.environ.get("PYTHONPATH", "NOT SET")}')
+
         # Pre-load libswiftCore.so to avoid ImportError when LD_LIBRARY_PATH is not set
         import ctypes
         import glob
-        
+
         # Try to find libswiftCore.so relative to PYTHONPATH or in standard locations
         # We assume PYTHONPATH points to .../usr/local/lib/python.../dist-packages
         # And libs are in .../usr/lib/swift/linux
-        
+
         # Use SWIFT_TOOLCHAIN_ROOT from env if available (set by register.py)
+        # First try with 'usr' suffix (standard layout), then without (Colab layout)
         toolchain_root = os.environ.get('SWIFT_TOOLCHAIN_ROOT', '/home/pedro/.local/share/swiftly/toolchains/6.2.1')
-        swift_lib_dir = os.path.join(toolchain_root, 'usr/lib/swift/linux')
-        libswiftCore = os.path.join(swift_lib_dir, 'libswiftCore.so')
-        
-        if os.path.exists(libswiftCore):
+
+        # Try different lib directory layouts
+        lib_candidates = [
+            os.path.join(toolchain_root, 'usr/lib/swift/linux'),  # Standard layout
+            os.path.join(toolchain_root, 'lib/swift/linux'),       # Colab/swiftly layout
+        ]
+
+        libswiftCore = None
+        swift_lib_dir = None
+        for candidate_dir in lib_candidates:
+            candidate_lib = os.path.join(candidate_dir, 'libswiftCore.so')
+            if os.path.exists(candidate_lib):
+                swift_lib_dir = candidate_dir
+                libswiftCore = candidate_lib
+                self.log.info(f'Found libswiftCore.so at {libswiftCore}')
+                break
+
+        if libswiftCore and os.path.exists(libswiftCore):
             try:
                 ctypes.CDLL(libswiftCore, mode=ctypes.RTLD_GLOBAL)
                 self.log.info(f'Pre-loaded {libswiftCore}')
             except Exception as e:
                 self.log.warning(f'Failed to pre-load {libswiftCore}: {e}')
         else:
-             self.log.warning(f'Could not find libswiftCore.so at {libswiftCore}')
+            self.log.warning(f'Could not find libswiftCore.so in any of: {lib_candidates}')
 
         # Also pre-load all libs in host/compiler to satisfy dependencies
-        host_compiler_dir = os.path.join(toolchain_root, 'usr/lib/swift/host/compiler')
-        if os.path.isdir(host_compiler_dir):
-            for lib_path in glob.glob(os.path.join(host_compiler_dir, '*.so')):
-                try:
-                    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-                    self.log.debug(f'Pre-loaded {lib_path}')
-                except Exception as e:
-                    self.log.warning(f'Failed to pre-load {lib_path}: {e}')
-        else:
-             self.log.warning(f'Could not find host compiler dir at {host_compiler_dir}')
+        host_compiler_candidates = [
+            os.path.join(toolchain_root, 'usr/lib/swift/host/compiler'),
+            os.path.join(toolchain_root, 'lib/swift/host/compiler'),
+        ]
 
+        for host_compiler_dir in host_compiler_candidates:
+            if os.path.isdir(host_compiler_dir):
+                self.log.info(f'Found host compiler dir at {host_compiler_dir}')
+                for lib_path in glob.glob(os.path.join(host_compiler_dir, '*.so')):
+                    try:
+                        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                        self.log.debug(f'Pre-loaded {lib_path}')
+                    except Exception as e:
+                        self.log.warning(f'Failed to pre-load {lib_path}: {e}')
+                break
+        else:
+            self.log.warning(f'Could not find host compiler dir in any of: {host_compiler_candidates}')
+
+        self.log.info('Step 1: Importing lldb module...')
         import lldb
+        self.log.info(f'Step 1 complete: lldb module loaded from {lldb.__file__}')
+
+        self.log.info('Step 2: Creating SBDebugger...')
         self.debugger = lldb.SBDebugger.Create()
         if not self.debugger:
             raise Exception('Could not start debugger')
+        self.log.info('Step 2 complete: SBDebugger created')
+
         self.debugger.SetAsync(False)
 
         if hasattr(self, 'swift_module_search_path'):
             self.debugger.HandleCommand("settings append target.swift-module-search-paths " + self.swift_module_search_path)
-
 
         # LLDB crashes while trying to load some Python stuff on Mac. Maybe
         # something is misconfigured? This works around the problem by telling
@@ -1149,18 +1182,28 @@ class SwiftKernel(Kernel):
         # anyways.
         self.debugger.SetScriptLanguage(lldb.eScriptLanguageNone)
 
+        self.log.info('Step 3: Creating target...')
         repl_swift = os.environ['REPL_SWIFT_PATH']
+        if not os.path.exists(repl_swift):
+            raise Exception(f'repl_swift not found at {repl_swift}')
+        self.log.info(f'repl_swift path: {repl_swift}')
+
         # Explicitly specify architecture for Apple Silicon compatibility
         import platform
         arch = platform.machine()  # Returns 'arm64' on Apple Silicon, 'x86_64' on Intel
+        self.log.info(f'Architecture: {arch}')
+
         self.target = self.debugger.CreateTargetWithFileAndArch(repl_swift, arch)
         if not self.target:
             raise Exception('Could not create target %s with arch %s' % (repl_swift, arch))
+        self.log.info('Step 3 complete: Target created')
 
+        self.log.info('Step 4: Setting breakpoint...')
         self.main_bp = self.target.BreakpointCreateByName(
             'repl_main', self.target.GetExecutable().GetFilename())
         if not self.main_bp:
             raise Exception('Could not set breakpoint')
+        self.log.info('Step 4 complete: Breakpoint set')
 
         repl_env = []
         script_dir = os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -1181,11 +1224,13 @@ class SwiftKernel(Kernel):
         launch_info.SetLaunchFlags(launch_flags & ~lldb.eLaunchFlagDisableASLR)
         self.target.SetLaunchInfo(launch_info)
 
+        self.log.info('Step 5: Launching process...')
         self.process = self.target.LaunchSimple(None,
                                                 repl_env,
                                                 os.getcwd())
         if not self.process:
             raise Exception('Could not launch process')
+        self.log.info(f'Step 5 complete: Process launched (PID: {self.process.GetProcessID()})')
 
         self.expr_opts = lldb.SBExpressionOptions()
         self.swift_language = lldb.SBLanguageRuntime.GetLanguageTypeFromString(
