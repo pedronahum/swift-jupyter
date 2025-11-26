@@ -71,13 +71,26 @@ def install_swift_jupyter():
         "binutils", "git", "gnupg2", "libc6-dev", "libcurl4-openssl-dev",
         "libedit2", "libgcc-11-dev", "libncurses6", "libpython3-dev",
         "libsqlite3-0", "libstdc++-11-dev", "libxml2-dev", "libz3-dev",
-        "pkg-config", "tzdata", "unzip", "zlib1g-dev"
+        "pkg-config", "tzdata", "unzip", "zlib1g-dev",
+        # Python 3.10 is needed because Swift toolchain LLDB is compiled against it
+        "python3.10", "python3.10-dev", "python3.10-venv"
     ]
 
     run("apt-get update -qq", check=False)
+    # Add deadsnakes PPA for Python 3.10 on Ubuntu 22.04
+    run("apt-get install -y -qq software-properties-common", check=False)
+    run("add-apt-repository -y ppa:deadsnakes/ppa", check=False)
+    run("apt-get update -qq", check=False)
     run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
 
-    # Install LLDB Python bindings
+    # Install pip for Python 3.10
+    run("python3.10 -m ensurepip --upgrade 2>/dev/null || curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10", check=False)
+
+    # Install Jupyter dependencies for Python 3.10
+    print("  Installing Jupyter dependencies for Python 3.10...")
+    run("python3.10 -m pip install -q jupyter ipykernel jupyter_client", check=False)
+
+    # Install LLDB Python bindings (for fallback)
     for version in [18, 17, 16, 15, 14]:
         result = subprocess.run(
             f"apt-get install -y -qq python3-lldb-{version}",
@@ -86,6 +99,13 @@ def install_swift_jupyter():
         if result.returncode == 0:
             print_success(f"Installed python3-lldb-{version}")
             break
+
+    # Verify Python 3.10 is installed
+    py310_path = shutil.which("python3.10")
+    if py310_path:
+        print_success(f"Python 3.10 installed at {py310_path}")
+    else:
+        print_warning("Python 3.10 not found, will try system Python")
 
     print_success("System dependencies installed")
 
@@ -237,78 +257,97 @@ def install_swift_jupyter():
     run(f"git clone --depth 1 -b {SWIFT_JUPYTER_BRANCH} {SWIFT_JUPYTER_REPO} {INSTALL_DIR}")
     print_success("Repository cloned")
 
-    # Step 5: Install Python dependencies
+    # Step 5: Install Python dependencies (already done for Python 3.10 above)
     print_step("Installing Python dependencies...")
     run("pip install -q jupyter ipykernel jupyter_client")
     print_success("Python dependencies installed")
 
-    # Step 6: Find LLDB Python path
+    # Step 6: Find LLDB Python path and determine which Python to use
     print_step("Configuring LLDB Python bindings...")
 
     lldb_python_path = None
+    kernel_python = sys.executable  # Default to current Python
     py_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
 
     # Build LD_LIBRARY_PATH for the toolchain (needed for LLDB to load Swift libs)
-    # The toolchain's LLDB requires these paths to load liblldb.so and Swift runtime
     toolchain_lib_paths = [
-        f"{swift_toolchain}/usr/lib",                      # liblldb.so location
-        f"{swift_toolchain}/usr/lib/swift/linux",          # Swift runtime
-        f"{swift_toolchain}/usr/lib/swift/host/compiler",  # Compiler libs (for main-snapshot)
-        f"{swift_toolchain}/lib",                          # Alternative layout
-        f"{swift_toolchain}/lib/swift/linux",              # Alternative layout
+        f"{swift_toolchain}/usr/lib",
+        f"{swift_toolchain}/usr/lib/swift/linux",
+        f"{swift_toolchain}/usr/lib/swift/host/compiler",
+        f"{swift_toolchain}/lib",
+        f"{swift_toolchain}/lib/swift/linux",
     ]
     toolchain_ld_path = ":".join(p for p in toolchain_lib_paths if os.path.exists(p))
 
-    # First, try the Swift toolchain's LLDB (preferred for compatibility)
-    # Swiftly toolchains have different directory structures
-    # The key path for swiftly is: /usr/local/lib/python3.XX/dist-packages
-    # IMPORTANT: The toolchain may have LLDB bindings for a specific Python version
-    # that doesn't match the system Python, so we search for all Python versions
-    swift_lldb_candidates = []
+    # First, detect what Python version the toolchain's LLDB was built for
+    # by looking for _lldb.cpython-3XX-*.so files
+    def detect_lldb_python_version(toolchain_path):
+        """Detect what Python version the toolchain's LLDB was built for."""
+        import glob
+        import re
 
-    # Search for any Python version's LLDB bindings in the toolchain
-    # The toolchain may have been built with a different Python version
-    for py_search_ver in [py_ver, "3.12", "3.11", "3.10", "3.9", "3"]:
-        swift_lldb_candidates.extend([
-            # Swiftly toolchain layout - most likely location for swiftly installs
-            f"{swift_toolchain}/usr/local/lib/python{py_search_ver}/dist-packages",
-            # Standard toolchain layout
-            f"{swift_toolchain}/lib/python{py_search_ver}/site-packages",
-            f"{swift_toolchain}/lib/python{py_search_ver}/dist-packages",
-            # Other swiftly layouts
-            f"{swift_toolchain}/usr/lib/python{py_search_ver}/site-packages",
-            f"{swift_toolchain}/usr/lib/python{py_search_ver}/dist-packages",
-        ])
-    # Also try generic paths
-    swift_lldb_candidates.extend([
-        f"{swift_toolchain}/usr/local/lib/python3/dist-packages",
-        f"{swift_toolchain}/lib/python3/dist-packages",
-        f"{swift_toolchain}/usr/lib/python3/dist-packages",
-    ])
-    # Remove duplicates while preserving order
-    swift_lldb_candidates = list(dict.fromkeys(swift_lldb_candidates))
+        # Search for LLDB Python bindings in the toolchain
+        for base in ["usr/local/lib", "lib", "usr/lib"]:
+            pattern = os.path.join(toolchain_path, base, "python*/dist-packages/lldb/_lldb.cpython-*.so")
+            matches = glob.glob(pattern)
+            if matches:
+                # Extract Python version from filename like _lldb.cpython-310-x86_64-linux-gnu.so
+                for match in matches:
+                    filename = os.path.basename(match)
+                    m = re.search(r'cpython-(\d)(\d+)-', filename)
+                    if m:
+                        major, minor = m.groups()
+                        return f"{major}.{minor}"
+        return None
 
-    # Then try system LLDB with version-specific paths
-    system_candidates = []
-    for llvm_ver in [18, 17, 16, 15, 14]:
-        system_candidates.extend([
-            f"/usr/lib/llvm-{llvm_ver}/lib/python{py_ver}/dist-packages",
-            f"/usr/lib/llvm-{llvm_ver}/lib/python3/dist-packages",
-            f"/usr/lib/llvm-{llvm_ver}/python{py_ver}/dist-packages",
-        ])
-    # Generic system path (last resort)
-    system_candidates.append("/usr/lib/python3/dist-packages")
+    toolchain_lldb_python = detect_lldb_python_version(swift_toolchain)
+    if toolchain_lldb_python:
+        print(f"  Toolchain LLDB was built for Python {toolchain_lldb_python}")
+    else:
+        print("  Could not detect toolchain LLDB Python version")
 
-    all_candidates = swift_lldb_candidates + system_candidates
+    # Determine which Python to use for the kernel
+    # Priority: toolchain's Python version > system Python
+    python_to_use = None
+    if toolchain_lldb_python:
+        # Check if that Python version is available
+        py_cmd = f"python{toolchain_lldb_python}"
+        py_path = shutil.which(py_cmd)
+        if py_path:
+            python_to_use = py_path
+            print(f"  Found {py_cmd} at {py_path}")
+        else:
+            print(f"  {py_cmd} not found, will try alternatives")
 
-    # Helper function to validate LLDB module has SBDebugger
-    def validate_lldb_path(path, ld_lib_path=""):
-        """Check if the LLDB module at path has SBDebugger.
+    # If toolchain Python not available, try system Python 3.10 (which we installed)
+    if not python_to_use:
+        for py_ver_try in ["3.10", "3.11", "3.12"]:
+            py_path = shutil.which(f"python{py_ver_try}")
+            if py_path:
+                python_to_use = py_path
+                print(f"  Using python{py_ver_try} at {py_path}")
+                break
 
-        Args:
-            path: Python path containing lldb module
-            ld_lib_path: LD_LIBRARY_PATH needed for native libs
-        """
+    if not python_to_use:
+        python_to_use = sys.executable
+        print(f"  Falling back to {python_to_use}")
+
+    # Get the Python version we'll actually use
+    try:
+        result = subprocess.run([python_to_use, '-c', 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'],
+                                capture_output=True, text=True, timeout=10)
+        kernel_py_ver = result.stdout.strip()
+    except Exception:
+        kernel_py_ver = py_ver
+
+    print(f"  Kernel will use: {python_to_use} (Python {kernel_py_ver})")
+
+    # Helper function to validate LLDB module has SBDebugger using specific Python
+    def validate_lldb_path(path, ld_lib_path="", python_exe=None):
+        """Check if the LLDB module at path has SBDebugger."""
+        if python_exe is None:
+            python_exe = python_to_use
+
         test_script = f'''
 import sys
 import os
@@ -318,7 +357,6 @@ if "{ld_lib_path}":
 try:
     import lldb
     if hasattr(lldb, 'SBDebugger'):
-        # Also verify we can create a debugger
         debugger = lldb.SBDebugger.Create()
         if debugger:
             lldb.SBDebugger.Destroy(debugger)
@@ -335,24 +373,51 @@ except Exception as e:
             env["LD_LIBRARY_PATH"] = ld_lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
         try:
             result = subprocess.run(
-                ['python3', '-c', test_script],
+                [python_exe, '-c', test_script],
                 capture_output=True, text=True, timeout=15,
                 env=env
             )
             output = result.stdout.strip()
             if output != "valid":
-                # Show what went wrong
                 print(f"    Validation output: {output}")
                 if result.stderr:
-                    print(f"    Validation stderr: {result.stderr[:200]}")
+                    stderr_preview = result.stderr[:200].replace('\n', ' ')
+                    print(f"    Validation stderr: {stderr_preview}")
             return output == "valid"
         except Exception as e:
             print(f"    Validation exception: {e}")
             return False
 
+    # Build list of LLDB candidates - prioritize the detected Python version
+    swift_lldb_candidates = []
+    search_versions = [kernel_py_ver]
+    if toolchain_lldb_python and toolchain_lldb_python != kernel_py_ver:
+        search_versions.append(toolchain_lldb_python)
+    search_versions.extend(["3.10", "3.11", "3.12", "3.9", "3"])
+    search_versions = list(dict.fromkeys(search_versions))  # Remove duplicates
+
+    for py_search_ver in search_versions:
+        swift_lldb_candidates.extend([
+            f"{swift_toolchain}/usr/local/lib/python{py_search_ver}/dist-packages",
+            f"{swift_toolchain}/lib/python{py_search_ver}/site-packages",
+            f"{swift_toolchain}/lib/python{py_search_ver}/dist-packages",
+            f"{swift_toolchain}/usr/lib/python{py_search_ver}/site-packages",
+            f"{swift_toolchain}/usr/lib/python{py_search_ver}/dist-packages",
+        ])
+    swift_lldb_candidates = list(dict.fromkeys(swift_lldb_candidates))
+
+    # System LLDB as fallback
+    system_candidates = []
+    for llvm_ver in [18, 17, 16, 15, 14]:
+        system_candidates.extend([
+            f"/usr/lib/llvm-{llvm_ver}/lib/python{kernel_py_ver}/dist-packages",
+            f"/usr/lib/llvm-{llvm_ver}/lib/python3/dist-packages",
+        ])
+    system_candidates.append("/usr/lib/python3/dist-packages")
+
     print("  Searching for valid LLDB Python bindings...")
     print(f"  Toolchain: {swift_toolchain}")
-    print(f"  Python version: {py_ver}")
+    print(f"  Kernel Python: {kernel_py_ver}")
     print(f"  LD_LIBRARY_PATH: {toolchain_ld_path}")
 
     # Helper function to fix Python version mismatch for _lldb native module
@@ -437,9 +502,9 @@ except Exception as e:
                 break
             else:
                 # Check if this is a Python version mismatch
-                # Try to fix by creating symlink for the correct Python version
+                # Try to fix by creating symlink for the kernel's Python version
                 print(f"  ✗ LLDB at {lldb_path} failed validation, checking Python version mismatch...")
-                if fix_lldb_python_version(lldb_path, py_ver):
+                if fix_lldb_python_version(lldb_path, kernel_py_ver):
                     # Try validation again after fixing
                     print(f"  Retrying validation after Python version fix...")
                     if validate_lldb_path(candidate, toolchain_ld_path):
@@ -551,7 +616,7 @@ else:
     sys.exit(1)
 '''
     test_result = subprocess.run(
-        ['python3', '-c', lldb_validation_script],
+        [python_to_use, '-c', lldb_validation_script],
         capture_output=True, text=True, timeout=30
     )
     if test_result.returncode == 0:
@@ -618,7 +683,7 @@ else:
 
     kernel_json = {
         "argv": [
-            sys.executable,
+            python_to_use,  # Use the Python version compatible with toolchain LLDB
             "-m", "swift_kernel",
             "-f", "{connection_file}"
         ],
@@ -636,6 +701,8 @@ else:
         },
         "interrupt_mode": "message"
     }
+
+    print(f"  Kernel Python: {python_to_use}")
 
     with open(os.path.join(kernel_dir, "kernel.json"), "w") as f:
         json.dump(kernel_json, f, indent=2)
@@ -671,7 +738,7 @@ else:
 
     # Test kernel import
     print("  Testing kernel import...")
-    test_cmd = f'''PYTHONPATH="{lldb_python_path}:{INSTALL_DIR}" LD_LIBRARY_PATH="{ld_library_path}" python3 -c "
+    test_cmd = f'''PYTHONPATH="{lldb_python_path}:{INSTALL_DIR}" LD_LIBRARY_PATH="{ld_library_path}" {python_to_use} -c "
 import sys
 sys.path.insert(0, '{INSTALL_DIR}')
 import swift_kernel

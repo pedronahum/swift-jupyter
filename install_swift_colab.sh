@@ -71,7 +71,12 @@ print_step "Installing system dependencies..."
 # Update package list silently
 apt-get update -qq > /dev/null 2>&1
 
-# Install required packages
+# Add deadsnakes PPA for Python 3.10 (needed for Swift toolchain LLDB)
+apt-get install -y -qq software-properties-common > /dev/null 2>&1
+add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
+apt-get update -qq > /dev/null 2>&1
+
+# Install required packages including Python 3.10
 apt-get install -y -qq \
     binutils \
     git \
@@ -91,9 +96,26 @@ apt-get install -y -qq \
     tzdata \
     unzip \
     zlib1g-dev \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
     > /dev/null 2>&1
 
-# Try to install python3-lldb for different LLVM versions
+# Install pip for Python 3.10
+python3.10 -m ensurepip --upgrade 2>/dev/null || curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 2>/dev/null
+
+# Install Jupyter dependencies for Python 3.10
+echo "  Installing Jupyter dependencies for Python 3.10..."
+python3.10 -m pip install -q jupyter ipykernel jupyter_client > /dev/null 2>&1
+
+# Verify Python 3.10
+if command -v python3.10 &> /dev/null; then
+    print_success "Python 3.10 installed at $(which python3.10)"
+else
+    print_warning "Python 3.10 not found, will try system Python"
+fi
+
+# Try to install python3-lldb for different LLVM versions (as fallback)
 for version in 18 17 16 15 14; do
     apt-get install -y -qq python3-lldb-$version > /dev/null 2>&1 && break || true
 done
@@ -239,14 +261,13 @@ cd "$INSTALL_DIR"
 pip install -q jupyter ipykernel jupyter_client > /dev/null 2>&1
 print_success "Python dependencies installed"
 
-# Step 6: Find LLDB Python bindings
+# Step 6: Find LLDB Python bindings and determine which Python to use
 print_step "Configuring LLDB Python bindings..."
 
-# Get Python version
+# Get system Python version
 PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
 
 # Build LD_LIBRARY_PATH for the toolchain (needed for LLDB to load Swift libs)
-# The toolchain's LLDB requires these paths to load liblldb.so and Swift runtime
 TOOLCHAIN_LD_PATH=""
 for path in "$SWIFT_TOOLCHAIN/usr/lib" \
             "$SWIFT_TOOLCHAIN/usr/lib/swift/linux" \
@@ -262,6 +283,66 @@ for path in "$SWIFT_TOOLCHAIN/usr/lib" \
     fi
 done
 
+# Detect what Python version the toolchain's LLDB was built for
+detect_lldb_python_version() {
+    local toolchain_path="$1"
+    for base in "usr/local/lib" "lib" "usr/lib"; do
+        for lldb_file in "$toolchain_path/$base"/python*/dist-packages/lldb/_lldb.cpython-*.so; do
+            if [ -e "$lldb_file" ]; then
+                # Extract version from filename like _lldb.cpython-310-x86_64-linux-gnu.so
+                local filename=$(basename "$lldb_file")
+                local ver=$(echo "$filename" | sed -n 's/.*cpython-\([0-9]\)\([0-9]*\)-.*/\1.\2/p')
+                if [ -n "$ver" ]; then
+                    echo "$ver"
+                    return 0
+                fi
+            fi
+        done
+    done
+    return 1
+}
+
+TOOLCHAIN_LLDB_PYTHON=$(detect_lldb_python_version "$SWIFT_TOOLCHAIN")
+if [ -n "$TOOLCHAIN_LLDB_PYTHON" ]; then
+    echo "  Toolchain LLDB was built for Python $TOOLCHAIN_LLDB_PYTHON"
+else
+    echo "  Could not detect toolchain LLDB Python version"
+fi
+
+# Determine which Python to use for the kernel
+# Priority: toolchain's Python version > Python 3.10 > system Python
+PYTHON_TO_USE=""
+if [ -n "$TOOLCHAIN_LLDB_PYTHON" ]; then
+    py_cmd="python$TOOLCHAIN_LLDB_PYTHON"
+    if command -v "$py_cmd" &> /dev/null; then
+        PYTHON_TO_USE=$(which "$py_cmd")
+        echo "  Found $py_cmd at $PYTHON_TO_USE"
+    else
+        echo "  $py_cmd not found, will try alternatives"
+    fi
+fi
+
+# If toolchain Python not available, try Python 3.10 (which we installed)
+if [ -z "$PYTHON_TO_USE" ]; then
+    for py_ver_try in "3.10" "3.11" "3.12"; do
+        py_cmd="python$py_ver_try"
+        if command -v "$py_cmd" &> /dev/null; then
+            PYTHON_TO_USE=$(which "$py_cmd")
+            echo "  Using $py_cmd at $PYTHON_TO_USE"
+            break
+        fi
+    done
+fi
+
+if [ -z "$PYTHON_TO_USE" ]; then
+    PYTHON_TO_USE=$(which python3)
+    echo "  Falling back to $PYTHON_TO_USE"
+fi
+
+# Get the Python version we'll actually use
+KERNEL_PY_VERSION=$($PYTHON_TO_USE -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
+echo "  Kernel will use: $PYTHON_TO_USE (Python $KERNEL_PY_VERSION)"
+
 # Find the LLDB Python path - try Swift toolchain first, then system
 LLDB_PYTHON_PATH=""
 
@@ -269,10 +350,11 @@ echo "  Searching for valid LLDB Python bindings..."
 echo "  Toolchain: $SWIFT_TOOLCHAIN"
 
 # Helper function to validate LLDB module has SBDebugger
+# Uses the selected Python interpreter
 validate_lldb_path() {
     local path="$1"
     local ld_path="$2"
-    LD_LIBRARY_PATH="$ld_path:$LD_LIBRARY_PATH" python3 -c "
+    LD_LIBRARY_PATH="$ld_path:$LD_LIBRARY_PATH" "$PYTHON_TO_USE" -c "
 import sys
 sys.path.insert(0, '$path')
 import lldb
@@ -342,15 +424,15 @@ fix_lldb_python_version() {
 
 # Try Swift toolchain's LLDB first (most compatible)
 # Swiftly toolchains have lldb under usr/local/lib/pythonX.Y/dist-packages
-# IMPORTANT: The toolchain may have LLDB bindings for a specific Python version
-# that doesn't match the system Python, so we search for all Python versions
+# Prioritize the kernel Python version
 
 echo "  Searching for valid LLDB Python bindings..."
 echo "  Toolchain: $SWIFT_TOOLCHAIN"
-echo "  System Python version: $PY_VERSION"
+echo "  Kernel Python version: $KERNEL_PY_VERSION"
 echo "  LD_LIBRARY_PATH: $TOOLCHAIN_LD_PATH"
 
-for py_search_ver in "$PY_VERSION" "3.12" "3.11" "3.10" "3.9" "3"; do
+for py_search_ver in "$KERNEL_PY_VERSION" "$TOOLCHAIN_LLDB_PYTHON" "3.10" "3.11" "3.12" "3.9" "3"; do
+    [ -z "$py_search_ver" ] && continue
     for base_path in "$SWIFT_TOOLCHAIN/usr/local/lib" "$SWIFT_TOOLCHAIN/lib" "$SWIFT_TOOLCHAIN/usr/lib"; do
         for sub_path in "python$py_search_ver/dist-packages" "python$py_search_ver/site-packages"; do
             candidate="$base_path/$sub_path"
@@ -365,7 +447,7 @@ for py_search_ver in "$PY_VERSION" "3.12" "3.11" "3.10" "3.9" "3"; do
                     echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
                     # Check if this is a Python version mismatch - try to fix
                     echo "  Checking if Python version mismatch can be fixed..."
-                    if fix_lldb_python_version "$candidate/lldb" "$PY_VERSION"; then
+                    if fix_lldb_python_version "$candidate/lldb" "$KERNEL_PY_VERSION"; then
                         # Retry validation after fix
                         echo "  Retrying validation after Python version fix..."
                         result=$(validate_lldb_path "$candidate" "$TOOLCHAIN_LD_PATH")
@@ -431,8 +513,8 @@ else
 fi
 
 # Test LLDB import AND debugger creation (this is what the kernel does)
-echo "  Testing LLDB import and debugger creation..."
-LLDB_TEST_RESULT=$(LD_LIBRARY_PATH="$TOOLCHAIN_LD_PATH:$LD_LIBRARY_PATH" timeout 30 python3 << LLDB_TEST_EOF
+echo "  Testing LLDB import and debugger creation with $PYTHON_TO_USE..."
+LLDB_TEST_RESULT=$(LD_LIBRARY_PATH="$TOOLCHAIN_LD_PATH:$LD_LIBRARY_PATH" timeout 30 "$PYTHON_TO_USE" << LLDB_TEST_EOF
 import sys
 import os
 sys.path.insert(0, "$LLDB_PYTHON_PATH")
@@ -535,11 +617,11 @@ fi
 # Add system library path as well
 LD_LIB_PATH="$TOOLCHAIN_LD_PATH:/usr/lib/x86_64-linux-gnu"
 
-# Create kernel.json
+# Create kernel.json with the selected Python interpreter
 cat > "$KERNEL_DIR/kernel.json" << EOF
 {
   "argv": [
-    "$(which python3)",
+    "$PYTHON_TO_USE",
     "-m", "swift_kernel",
     "-f", "{connection_file}"
   ],
@@ -560,6 +642,7 @@ cat > "$KERNEL_DIR/kernel.json" << EOF
 EOF
 
 echo "  Kernel config written to: $KERNEL_DIR/kernel.json"
+echo "  Kernel Python: $PYTHON_TO_USE"
 echo "  PYTHONPATH: $LLDB_PYTHON_PATH:$INSTALL_DIR"
 echo "  Swift toolchain: $SWIFT_TOOLCHAIN"
 
@@ -593,8 +676,8 @@ else
 fi
 
 # Test kernel import
-echo "  Testing kernel import..."
-if PYTHONPATH="$LLDB_PYTHON_PATH:$INSTALL_DIR" LD_LIBRARY_PATH="$LD_LIB_PATH" python3 -c "import swift_kernel; print('Kernel module loaded')" 2>/dev/null; then
+echo "  Testing kernel import with $PYTHON_TO_USE..."
+if PYTHONPATH="$LLDB_PYTHON_PATH:$INSTALL_DIR" LD_LIBRARY_PATH="$LD_LIB_PATH" "$PYTHON_TO_USE" -c "import swift_kernel; print('Kernel module loaded')" 2>/dev/null; then
     print_success "Kernel import test passed"
 else
     print_warning "Kernel import test failed"
