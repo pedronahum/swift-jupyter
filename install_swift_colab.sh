@@ -288,6 +288,58 @@ else:
 " 2>/dev/null
 }
 
+# Helper function to fix Python version mismatch for _lldb native module
+# The _lldb.cpython-3XX-x86_64-linux-gnu.so is just a symlink to liblldb.so,
+# which is Python-version agnostic. If the toolchain was built with a different
+# Python version, we can create a symlink with the correct version suffix.
+fix_lldb_python_version() {
+    local lldb_dir="$1"
+    local target_py_ver="$2"
+
+    # Get architecture
+    local arch=$(uname -m)
+    local target_suffix="cpython-${target_py_ver//.}-${arch}-linux-gnu.so"
+    local target_module="$lldb_dir/_lldb.$target_suffix"
+
+    # Check if target module already exists
+    if [ -e "$target_module" ]; then
+        return 0
+    fi
+
+    # Find existing _lldb.cpython-*.so files
+    local existing_module=$(ls "$lldb_dir"/_lldb.cpython-*.so 2>/dev/null | head -1)
+
+    if [ -z "$existing_module" ]; then
+        # Check for direct _lldb.so
+        if [ -e "$lldb_dir/_lldb.so" ]; then
+            ln -sf "_lldb.so" "$target_module" 2>/dev/null && \
+                echo "    Created symlink: _lldb.$target_suffix -> _lldb.so" && \
+                return 0
+        fi
+        return 1
+    fi
+
+    local existing_basename=$(basename "$existing_module")
+
+    # Check what the existing module points to
+    if [ -L "$existing_module" ]; then
+        local link_target=$(readlink "$existing_module")
+        echo "    Found: $existing_basename -> $link_target"
+        # Create symlink with target Python version pointing to same target
+        ln -sf "$link_target" "$target_module" 2>/dev/null && \
+            echo "    Created symlink: _lldb.$target_suffix -> $link_target" && \
+            return 0
+    else
+        echo "    Found: $existing_basename (not a symlink)"
+        # Symlink to the existing file
+        ln -sf "$existing_basename" "$target_module" 2>/dev/null && \
+            echo "    Created symlink: _lldb.$target_suffix -> $existing_basename" && \
+            return 0
+    fi
+
+    return 1
+}
+
 # Try Swift toolchain's LLDB first (most compatible)
 # Swiftly toolchains have lldb under usr/local/lib/pythonX.Y/dist-packages
 # IMPORTANT: The toolchain may have LLDB bindings for a specific Python version
@@ -311,6 +363,20 @@ for py_search_ver in "$PY_VERSION" "3.12" "3.11" "3.10" "3.9" "3"; do
                     break 3
                 else
                     echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
+                    # Check if this is a Python version mismatch - try to fix
+                    echo "  Checking if Python version mismatch can be fixed..."
+                    if fix_lldb_python_version "$candidate/lldb" "$PY_VERSION"; then
+                        # Retry validation after fix
+                        echo "  Retrying validation after Python version fix..."
+                        result=$(validate_lldb_path "$candidate" "$TOOLCHAIN_LD_PATH")
+                        if [ "$result" = "valid" ]; then
+                            LLDB_PYTHON_PATH="$candidate"
+                            echo "  ✓ Valid toolchain LLDB found after version fix: $candidate/lldb"
+                            break 3
+                        else
+                            echo "  ✗ Still failed after version fix: $result"
+                        fi
+                    fi
                 fi
             fi
         done

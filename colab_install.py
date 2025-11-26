@@ -355,6 +355,75 @@ except Exception as e:
     print(f"  Python version: {py_ver}")
     print(f"  LD_LIBRARY_PATH: {toolchain_ld_path}")
 
+    # Helper function to fix Python version mismatch for _lldb native module
+    def fix_lldb_python_version(lldb_dir, target_py_ver):
+        """Create symlink for _lldb native module if Python version doesn't match.
+
+        The _lldb.cpython-3XX-x86_64-linux-gnu.so is just a symlink to liblldb.so,
+        which is Python-version agnostic. If the toolchain was built with a different
+        Python version, we can create a symlink with the correct version suffix.
+
+        Args:
+            lldb_dir: Path to lldb directory (e.g., .../dist-packages/lldb)
+            target_py_ver: Target Python version (e.g., "3.12")
+
+        Returns:
+            True if fixed or already correct, False if cannot fix
+        """
+        import glob
+        import platform
+
+        arch = platform.machine()
+        target_suffix = f"cpython-{target_py_ver.replace('.', '')}-{arch}-linux-gnu.so"
+        target_module = os.path.join(lldb_dir, f"_lldb.{target_suffix}")
+
+        # Check if target module already exists
+        if os.path.exists(target_module):
+            return True
+
+        # Find existing _lldb.cpython-*.so files
+        existing_modules = glob.glob(os.path.join(lldb_dir, "_lldb.cpython-*.so"))
+
+        if not existing_modules:
+            # No native modules found - check if there's a direct _lldb.so
+            direct_module = os.path.join(lldb_dir, "_lldb.so")
+            if os.path.exists(direct_module):
+                # Create versioned symlink to direct module
+                try:
+                    os.symlink("_lldb.so", target_module)
+                    print(f"    Created symlink: _lldb.{target_suffix} -> _lldb.so")
+                    return True
+                except Exception as e:
+                    print(f"    Failed to create symlink: {e}")
+                    return False
+            return False
+
+        # Get the first existing module (they all point to the same liblldb.so)
+        existing_module = existing_modules[0]
+        existing_basename = os.path.basename(existing_module)
+
+        # Check what the existing module points to
+        if os.path.islink(existing_module):
+            link_target = os.readlink(existing_module)
+            print(f"    Found: {existing_basename} -> {link_target}")
+        else:
+            link_target = existing_basename
+            print(f"    Found: {existing_basename} (not a symlink)")
+
+        # Create symlink with target Python version pointing to same target
+        try:
+            # If existing is a symlink, use the same target
+            # If existing is a real file, symlink to that file
+            if os.path.islink(existing_module):
+                os.symlink(link_target, target_module)
+            else:
+                os.symlink(existing_basename, target_module)
+            print(f"    Created symlink: _lldb.{target_suffix} -> {link_target}")
+            return True
+        except Exception as e:
+            print(f"    Failed to create symlink: {e}")
+            return False
+
     # First try toolchain LLDB with proper LD_LIBRARY_PATH
     for candidate in swift_lldb_candidates:
         lldb_path = os.path.join(candidate, "lldb")
@@ -367,7 +436,20 @@ except Exception as e:
                 print(f"  ✓ Valid toolchain LLDB found at: {lldb_path}")
                 break
             else:
-                print(f"  ✗ LLDB at {lldb_path} failed validation")
+                # Check if this is a Python version mismatch
+                # Try to fix by creating symlink for the correct Python version
+                print(f"  ✗ LLDB at {lldb_path} failed validation, checking Python version mismatch...")
+                if fix_lldb_python_version(lldb_path, py_ver):
+                    # Try validation again after fixing
+                    print(f"  Retrying validation after Python version fix...")
+                    if validate_lldb_path(candidate, toolchain_ld_path):
+                        lldb_python_path = candidate
+                        print(f"  ✓ Valid toolchain LLDB found after version fix: {lldb_path}")
+                        break
+                    else:
+                        print(f"  ✗ Still failed after version fix")
+                else:
+                    print(f"  Could not fix Python version mismatch")
 
     # Then try system LLDB (without special LD_LIBRARY_PATH)
     if not lldb_python_path:
