@@ -171,10 +171,62 @@ def install_swift_jupyter():
 
     # Get Swift version and path
     swift_version = run("swift --version", capture=True).split('\n')[0]
-    swift_path = run("which swift", capture=True)
-    swift_toolchain = str(Path(swift_path).parent.parent)
+
+    # Find the toolchain path - swiftly uses shims, so we need to read its config
+    swift_toolchain = None
+
+    # Method 1: Check swiftly's config.json for the in-use toolchain
+    swiftly_config = os.path.join(swiftly_home, "config.json")
+    if os.path.exists(swiftly_config):
+        try:
+            with open(swiftly_config) as f:
+                config = json.load(f)
+            in_use = config.get("inUse")
+            if in_use:
+                candidate = os.path.join(swiftly_home, "toolchains", in_use)
+                if os.path.exists(os.path.join(candidate, "usr", "bin", "swift")):
+                    swift_toolchain = candidate
+                    print(f"  Found toolchain via swiftly config: {in_use}")
+        except Exception as e:
+            print_warning(f"Could not read swiftly config: {e}")
+
+    # Method 2: Fall back to resolving symlinks if that fails
+    if not swift_toolchain:
+        swift_path = run("which swift", capture=True)
+        swift_real_path = os.path.realpath(swift_path)
+        # If realpath points to swiftly itself, we can't use it
+        if "swiftly/bin/swiftly" not in swift_real_path:
+            swift_toolchain = str(Path(swift_real_path).parent.parent)
+            # Verify this is a valid toolchain path
+            if not os.path.exists(os.path.join(swift_toolchain, "usr", "bin")) and \
+               not os.path.exists(os.path.join(swift_toolchain, "bin")):
+                alt_toolchain = str(Path(swift_real_path).parent.parent.parent)
+                if os.path.exists(os.path.join(alt_toolchain, "usr", "bin")):
+                    swift_toolchain = alt_toolchain
+                else:
+                    swift_toolchain = None
+
+    # Method 3: Search toolchains directory for the one we just installed
+    if not swift_toolchain:
+        toolchains_dir = os.path.join(swiftly_home, "toolchains")
+        if os.path.exists(toolchains_dir):
+            # Look for the snapshot we tried to install
+            for snapshot in [SWIFT_SNAPSHOT, f"{SWIFT_SNAPSHOT}a", "main-snapshot"]:
+                for name in os.listdir(toolchains_dir):
+                    if snapshot in name or name.startswith(snapshot.split("-")[0]):
+                        candidate = os.path.join(toolchains_dir, name)
+                        if os.path.exists(os.path.join(candidate, "usr", "bin", "swift")):
+                            swift_toolchain = candidate
+                            print(f"  Found toolchain by searching: {name}")
+                            break
+                if swift_toolchain:
+                    break
+
+    if not swift_toolchain:
+        raise Exception("Could not determine Swift toolchain path. Check swiftly installation.")
 
     print_success(f"Swift installed: {swift_version}")
+    print(f"  Toolchain path: {swift_toolchain}")
 
     # Step 4: Clone swift-jupyter
     print_step("Setting up Swift Jupyter kernel...")

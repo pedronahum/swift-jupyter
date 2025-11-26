@@ -165,8 +165,61 @@ fi
 SWIFT_VERSION=$(swift --version 2>&1 | head -1)
 print_success "Swift installed: $SWIFT_VERSION"
 
-# Get toolchain path
-SWIFT_TOOLCHAIN=$(dirname $(dirname $(which swift)))
+# Get toolchain path - swiftly uses shims, so we need to read its config
+SWIFT_TOOLCHAIN=""
+
+# Method 1: Check swiftly's config.json for the in-use toolchain
+SWIFTLY_CONFIG="$SWIFTLY_HOME/config.json"
+if [ -f "$SWIFTLY_CONFIG" ]; then
+    # Parse JSON to get inUse value (using python since jq may not be available)
+    IN_USE=$(python3 -c "import json; print(json.load(open('$SWIFTLY_CONFIG')).get('inUse', ''))" 2>/dev/null)
+    if [ -n "$IN_USE" ]; then
+        CANDIDATE="$SWIFTLY_HOME/toolchains/$IN_USE"
+        if [ -f "$CANDIDATE/usr/bin/swift" ]; then
+            SWIFT_TOOLCHAIN="$CANDIDATE"
+            echo "  Found toolchain via swiftly config: $IN_USE"
+        fi
+    fi
+fi
+
+# Method 2: Fall back to resolving symlinks if that fails
+if [ -z "$SWIFT_TOOLCHAIN" ]; then
+    SWIFT_PATH=$(which swift)
+    SWIFT_REAL_PATH=$(readlink -f "$SWIFT_PATH" 2>/dev/null)
+    # Check if realpath points to swiftly itself
+    if [[ "$SWIFT_REAL_PATH" != *"swiftly/bin/swiftly"* ]]; then
+        CANDIDATE=$(dirname $(dirname "$SWIFT_REAL_PATH"))
+        if [ -d "$CANDIDATE/usr/bin" ] || [ -d "$CANDIDATE/bin" ]; then
+            SWIFT_TOOLCHAIN="$CANDIDATE"
+        fi
+    fi
+fi
+
+# Method 3: Search toolchains directory for the one we just installed
+if [ -z "$SWIFT_TOOLCHAIN" ]; then
+    TOOLCHAINS_DIR="$SWIFTLY_HOME/toolchains"
+    if [ -d "$TOOLCHAINS_DIR" ]; then
+        for snapshot in "$SWIFT_SNAPSHOT" "${SWIFT_SNAPSHOT}a" "main-snapshot"; do
+            for name in $(ls "$TOOLCHAINS_DIR" 2>/dev/null); do
+                if [[ "$name" == *"$snapshot"* ]] || [[ "$name" == main-* ]]; then
+                    CANDIDATE="$TOOLCHAINS_DIR/$name"
+                    if [ -f "$CANDIDATE/usr/bin/swift" ]; then
+                        SWIFT_TOOLCHAIN="$CANDIDATE"
+                        echo "  Found toolchain by searching: $name"
+                        break 2
+                    fi
+                fi
+            done
+        done
+    fi
+fi
+
+if [ -z "$SWIFT_TOOLCHAIN" ]; then
+    print_error "Could not determine Swift toolchain path. Check swiftly installation."
+    exit 1
+fi
+
+echo "  Toolchain path: $SWIFT_TOOLCHAIN"
 
 # Step 4: Clone swift-jupyter repository
 print_step "Setting up Swift Jupyter kernel..."
