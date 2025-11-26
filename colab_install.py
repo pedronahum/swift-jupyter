@@ -194,7 +194,16 @@ def install_swift_jupyter():
     print_step("Configuring LLDB Python bindings...")
 
     lldb_python_path = None
-    candidates = [
+
+    # First, try the Swift toolchain's LLDB (preferred for compatibility)
+    swift_lldb_candidates = [
+        f"{swift_toolchain}/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages",
+        f"{swift_toolchain}/lib/python{sys.version_info[0]}/dist-packages",
+        f"{swift_toolchain}/lib/python3/dist-packages",
+    ]
+
+    # Then try system LLDB
+    system_candidates = [
         "/usr/lib/python3/dist-packages",
         f"/usr/lib/llvm-18/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
         f"/usr/lib/llvm-17/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
@@ -202,9 +211,13 @@ def install_swift_jupyter():
         f"/usr/lib/llvm-15/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
     ]
 
-    for candidate in candidates:
-        if os.path.isdir(os.path.join(candidate, "lldb")):
+    all_candidates = swift_lldb_candidates + system_candidates
+
+    for candidate in all_candidates:
+        lldb_path = os.path.join(candidate, "lldb")
+        if os.path.isdir(lldb_path):
             lldb_python_path = candidate
+            print(f"  Found LLDB at: {lldb_path}")
             break
 
     if not lldb_python_path:
@@ -213,11 +226,30 @@ def install_swift_jupyter():
     else:
         print_success(f"LLDB Python path: {lldb_python_path}")
 
+    # Verify LLDB can be imported
+    print("  Testing LLDB import...")
+    test_result = subprocess.run(
+        f'PYTHONPATH="{lldb_python_path}" python3 -c "import lldb; print(lldb.__file__)"',
+        shell=True, capture_output=True, text=True
+    )
+    if test_result.returncode == 0:
+        print_success(f"LLDB import successful: {test_result.stdout.strip()}")
+    else:
+        print_warning(f"LLDB import failed: {test_result.stderr[:100]}")
+
     # Step 7: Register kernel
     print_step("Registering Swift Jupyter kernel...")
 
     kernel_dir = "/usr/local/share/jupyter/kernels/swift"
     os.makedirs(kernel_dir, exist_ok=True)
+
+    # Build comprehensive LD_LIBRARY_PATH
+    ld_library_paths = [
+        f"{swift_toolchain}/lib/swift/linux",
+        f"{swift_toolchain}/lib",
+        "/usr/lib/x86_64-linux-gnu",
+    ]
+    ld_library_path = ":".join(ld_library_paths)
 
     kernel_json = {
         "argv": [
@@ -233,7 +265,8 @@ def install_swift_jupyter():
             "SWIFT_BUILD_PATH": f"{swift_toolchain}/bin/swift-build",
             "SWIFT_PACKAGE_PATH": f"{swift_toolchain}/bin/swift-package",
             "PATH": f"{swift_toolchain}/bin:{swiftly_bin}:{os.environ['PATH']}",
-            "LD_LIBRARY_PATH": f"{swift_toolchain}/lib/swift/linux"
+            "LD_LIBRARY_PATH": ld_library_path,
+            "SWIFT_TOOLCHAIN": swift_toolchain
         },
         "interrupt_mode": "message"
     }
@@ -241,9 +274,14 @@ def install_swift_jupyter():
     with open(os.path.join(kernel_dir, "kernel.json"), "w") as f:
         json.dump(kernel_json, f, indent=2)
 
+    # Print the kernel.json for debugging
+    print(f"  Kernel config written to: {kernel_dir}/kernel.json")
+    print(f"  PYTHONPATH: {lldb_python_path}:{INSTALL_DIR}")
+    print(f"  Swift toolchain: {swift_toolchain}")
+
     print_success("Swift kernel registered")
 
-    # Step 8: Verify
+    # Step 8: Verify installation
     print_step("Verifying installation...")
 
     result = run("jupyter kernelspec list", capture=True)
@@ -251,6 +289,20 @@ def install_swift_jupyter():
         print_success("Swift kernel found in Jupyter")
     else:
         print_error("Swift kernel not found")
+
+    # Test kernel import
+    print("  Testing kernel import...")
+    test_cmd = f'''PYTHONPATH="{lldb_python_path}:{INSTALL_DIR}" LD_LIBRARY_PATH="{ld_library_path}" python3 -c "
+import sys
+sys.path.insert(0, '{INSTALL_DIR}')
+import swift_kernel
+print('Kernel module loaded successfully')
+"'''
+    test_result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
+    if test_result.returncode == 0:
+        print_success("Kernel import test passed")
+    else:
+        print_warning(f"Kernel import test failed: {test_result.stderr[:200]}")
 
     # Step 9: Create test notebook
     print_step("Creating test notebook...")

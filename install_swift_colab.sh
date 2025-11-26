@@ -189,20 +189,39 @@ print_success "Python dependencies installed"
 # Step 6: Find LLDB Python bindings
 print_step "Configuring LLDB Python bindings..."
 
-# Find the system LLDB Python path
+# Get Python version
+PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
+
+# Find the LLDB Python path - try Swift toolchain first, then system
 LLDB_PYTHON_PATH=""
-for version in 18 17 16 15 14; do
-    candidate="/usr/lib/python3/dist-packages"
+
+# Try Swift toolchain's LLDB first (most compatible)
+for candidate in "$SWIFT_TOOLCHAIN/lib/python$PY_VERSION/site-packages" \
+                 "$SWIFT_TOOLCHAIN/lib/python3/dist-packages"; do
     if [ -d "$candidate/lldb" ]; then
         LLDB_PYTHON_PATH="$candidate"
-        break
-    fi
-    candidate="/usr/lib/llvm-$version/lib/python$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')/dist-packages"
-    if [ -d "$candidate/lldb" ]; then
-        LLDB_PYTHON_PATH="$candidate"
+        echo "  Found Swift toolchain LLDB at: $candidate/lldb"
         break
     fi
 done
+
+# Fall back to system LLDB
+if [ -z "$LLDB_PYTHON_PATH" ]; then
+    for version in 18 17 16 15 14; do
+        candidate="/usr/lib/python3/dist-packages"
+        if [ -d "$candidate/lldb" ]; then
+            LLDB_PYTHON_PATH="$candidate"
+            echo "  Found system LLDB at: $candidate/lldb"
+            break
+        fi
+        candidate="/usr/lib/llvm-$version/lib/python$PY_VERSION/dist-packages"
+        if [ -d "$candidate/lldb" ]; then
+            LLDB_PYTHON_PATH="$candidate"
+            echo "  Found LLVM-$version LLDB at: $candidate/lldb"
+            break
+        fi
+    done
+fi
 
 if [ -z "$LLDB_PYTHON_PATH" ]; then
     print_warning "Could not find LLDB Python bindings automatically"
@@ -210,6 +229,14 @@ if [ -z "$LLDB_PYTHON_PATH" ]; then
 fi
 
 print_success "LLDB Python path: $LLDB_PYTHON_PATH"
+
+# Test LLDB import
+echo "  Testing LLDB import..."
+if PYTHONPATH="$LLDB_PYTHON_PATH" python3 -c "import lldb; print('LLDB loaded:', lldb.__file__)" 2>/dev/null; then
+    print_success "LLDB import successful"
+else
+    print_warning "LLDB import test failed"
+fi
 
 # Step 7: Register the Swift kernel
 print_step "Registering Swift Jupyter kernel..."
@@ -223,6 +250,9 @@ mkdir -p "$KERNEL_DIR"
 # Find swift-build and swift-package paths
 SWIFT_BUILD_PATH="$SWIFT_TOOLCHAIN/bin/swift-build"
 SWIFT_PACKAGE_PATH="$SWIFT_TOOLCHAIN/bin/swift-package"
+
+# Build comprehensive LD_LIBRARY_PATH
+LD_LIB_PATH="$SWIFT_TOOLCHAIN/lib/swift/linux:$SWIFT_TOOLCHAIN/lib:/usr/lib/x86_64-linux-gnu"
 
 # Create kernel.json
 cat > "$KERNEL_DIR/kernel.json" << EOF
@@ -240,16 +270,29 @@ cat > "$KERNEL_DIR/kernel.json" << EOF
     "SWIFT_BUILD_PATH": "$SWIFT_BUILD_PATH",
     "SWIFT_PACKAGE_PATH": "$SWIFT_PACKAGE_PATH",
     "PATH": "$SWIFT_TOOLCHAIN/bin:$PATH",
-    "LD_LIBRARY_PATH": "$SWIFT_TOOLCHAIN/lib/swift/linux"
+    "LD_LIBRARY_PATH": "$LD_LIB_PATH",
+    "SWIFT_TOOLCHAIN": "$SWIFT_TOOLCHAIN"
   },
   "interrupt_mode": "message"
 }
 EOF
 
+echo "  Kernel config written to: $KERNEL_DIR/kernel.json"
+echo "  PYTHONPATH: $LLDB_PYTHON_PATH:$INSTALL_DIR"
+echo "  Swift toolchain: $SWIFT_TOOLCHAIN"
+
 # Also try using register.py for completeness (might set additional paths)
 python3 register.py --sys-prefix --swift-toolchain "$SWIFT_TOOLCHAIN" > /dev/null 2>&1 || true
 
 print_success "Swift kernel registered"
+
+# Test kernel import
+echo "  Testing kernel import..."
+if PYTHONPATH="$LLDB_PYTHON_PATH:$INSTALL_DIR" LD_LIBRARY_PATH="$LD_LIB_PATH" python3 -c "import swift_kernel; print('Kernel module loaded')" 2>/dev/null; then
+    print_success "Kernel import test passed"
+else
+    print_warning "Kernel import test failed"
+fi
 
 # Step 8: Verify installation
 print_step "Verifying installation..."
