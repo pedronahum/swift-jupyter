@@ -22,7 +22,7 @@ import shutil
 from pathlib import Path
 
 # Configuration
-SWIFT_SNAPSHOT = "main-snapshot"
+SWIFT_SNAPSHOT = "main-snapshot-2025-11-03"  # Specific known-working snapshot
 SWIFT_JUPYTER_REPO = "https://github.com/pedronahum/swift-jupyter.git"
 SWIFT_JUPYTER_BRANCH = "main"
 INSTALL_DIR = "/content/swift-jupyter"
@@ -92,27 +92,47 @@ def install_swift_jupyter():
     # Step 2: Install Swiftly
     print_step("Installing Swiftly...")
 
-    swiftly_path = os.path.expanduser("~/.local/share/swiftly/bin/swiftly")
+    swiftly_home = os.path.expanduser("~/.local/share/swiftly")
+    swiftly_bin = os.path.join(swiftly_home, "bin")
+    swiftly_path = os.path.join(swiftly_bin, "swiftly")
+
     if not os.path.exists(swiftly_path):
-        run("curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y")
-        print_success("Swiftly installed")
+        # Try new method first (from https://www.swift.org/install/linux/)
+        import platform
+        arch = platform.machine()  # x86_64 or aarch64
+
+        try:
+            install_cmds = f"""
+                cd /tmp &&
+                curl -fsSL -O https://download.swift.org/swiftly/linux/swiftly-{arch}.tar.gz &&
+                tar zxf swiftly-{arch}.tar.gz &&
+                ./swiftly init --quiet-shell-followup -y
+            """
+            run(install_cmds)
+            print_success("Swiftly installed (new method)")
+        except Exception:
+            # Fallback to old method (works in some environments)
+            print_warning("New method failed, trying legacy installer...")
+            run("curl -fsSL https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y")
+            print_success("Swiftly installed (legacy method)")
     else:
         print_success("Swiftly already installed")
 
+    # Source the swiftly environment
+    env_file = os.path.join(swiftly_home, "env.sh")
+    if os.path.exists(env_file):
+        # Parse env.sh and add to environment
+        os.environ["SWIFTLY_HOME_DIR"] = swiftly_home
+        os.environ["SWIFTLY_BIN_DIR"] = swiftly_bin
+
     # Add to PATH
-    swiftly_bin = os.path.expanduser("~/.local/share/swiftly/bin")
     os.environ["PATH"] = f"{swiftly_bin}:{os.environ['PATH']}"
 
     # Step 3: Install Swift
-    print_step("Installing Swift development snapshot (2-3 minutes)...")
+    print_step(f"Installing Swift {SWIFT_SNAPSHOT} (2-3 minutes)...")
 
-    try:
-        run(f"{swiftly_bin}/swiftly install {SWIFT_SNAPSHOT} -y")
-        run(f"{swiftly_bin}/swiftly use {SWIFT_SNAPSHOT}")
-    except:
-        print_warning("Failed with main-snapshot, trying specific version...")
-        run(f"{swiftly_bin}/swiftly install main-snapshot-2025-11-03 -y")
-        run(f"{swiftly_bin}/swiftly use main-snapshot-2025-11-03")
+    run(f"{swiftly_bin}/swiftly install {SWIFT_SNAPSHOT} -y")
+    run(f"{swiftly_bin}/swiftly use {SWIFT_SNAPSHOT}")
 
     # Get Swift version and path
     swift_version = run("swift --version", capture=True).split('\n')[0]

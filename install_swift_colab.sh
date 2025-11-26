@@ -48,7 +48,7 @@ print_error() {
 }
 
 # Configuration
-SWIFT_SNAPSHOT="main-snapshot"  # Use latest main snapshot
+SWIFT_SNAPSHOT="main-snapshot-2025-11-03"  # Specific known-working snapshot
 SWIFT_JUPYTER_REPO="https://github.com/pedronahum/swift-jupyter.git"
 SWIFT_JUPYTER_BRANCH="main"
 INSTALL_DIR="/content/swift-jupyter"
@@ -103,28 +103,43 @@ print_success "System dependencies installed"
 # Step 2: Install Swiftly
 print_step "Installing Swiftly (Swift toolchain manager)..."
 
-if [ ! -f "$HOME/.local/share/swiftly/bin/swiftly" ]; then
-    curl -L https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y > /dev/null 2>&1
-    print_success "Swiftly installed"
+SWIFTLY_HOME="$HOME/.local/share/swiftly"
+SWIFTLY_BIN="$SWIFTLY_HOME/bin"
+
+if [ ! -f "$SWIFTLY_BIN/swiftly" ]; then
+    # Try new installation method first (from https://www.swift.org/install/linux/)
+    ARCH=$(uname -m)
+    cd /tmp
+    if curl -fsSL -O https://download.swift.org/swiftly/linux/swiftly-${ARCH}.tar.gz 2>/dev/null && \
+       tar zxf swiftly-${ARCH}.tar.gz 2>/dev/null && \
+       ./swiftly init --quiet-shell-followup -y > /dev/null 2>&1; then
+        print_success "Swiftly installed (new method)"
+    else
+        # Fallback to legacy installer
+        print_warning "New method failed, trying legacy installer..."
+        curl -fsSL https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y > /dev/null 2>&1
+        print_success "Swiftly installed (legacy method)"
+    fi
+    cd - > /dev/null
 else
     print_success "Swiftly already installed"
 fi
 
-# Add Swiftly to PATH for this session
-export PATH="$HOME/.local/share/swiftly/bin:$PATH"
+# Source the swiftly environment
+export SWIFTLY_HOME_DIR="$SWIFTLY_HOME"
+export SWIFTLY_BIN_DIR="$SWIFTLY_BIN"
+export PATH="$SWIFTLY_BIN:$PATH"
+
+# Source env.sh if it exists
+if [ -f "$SWIFTLY_HOME/env.sh" ]; then
+    . "$SWIFTLY_HOME/env.sh"
+fi
 
 # Step 3: Install Swift snapshot
-print_step "Installing Swift development snapshot (this may take 2-3 minutes)..."
+print_step "Installing Swift $SWIFT_SNAPSHOT (this may take 2-3 minutes)..."
 
-# Get the latest main snapshot
-swiftly install $SWIFT_SNAPSHOT -y > /dev/null 2>&1 || {
-    print_warning "Failed to install $SWIFT_SNAPSHOT, trying specific snapshot..."
-    # Fallback to a known working snapshot
-    swiftly install main-snapshot-2025-11-03 -y > /dev/null 2>&1
-}
-
-# Set as default
-swiftly use $SWIFT_SNAPSHOT > /dev/null 2>&1 || swiftly use main-snapshot-2025-11-03 > /dev/null 2>&1
+swiftly install $SWIFT_SNAPSHOT -y > /dev/null 2>&1
+swiftly use $SWIFT_SNAPSHOT > /dev/null 2>&1
 
 # Verify Swift installation
 SWIFT_VERSION=$(swift --version 2>&1 | head -1)
