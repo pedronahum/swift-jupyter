@@ -290,21 +290,31 @@ else:
 
 # Try Swift toolchain's LLDB first (most compatible)
 # Swiftly toolchains have lldb under usr/local/lib/pythonX.Y/dist-packages
-for candidate in "$SWIFT_TOOLCHAIN/usr/local/lib/python$PY_VERSION/dist-packages" \
-                 "$SWIFT_TOOLCHAIN/usr/local/lib/python3/dist-packages" \
-                 "$SWIFT_TOOLCHAIN/lib/python$PY_VERSION/site-packages" \
-                 "$SWIFT_TOOLCHAIN/lib/python3/dist-packages"; do
-    if [ -d "$candidate/lldb" ]; then
-        echo "  Checking toolchain LLDB: $candidate/lldb"
-        result=$(validate_lldb_path "$candidate" "$TOOLCHAIN_LD_PATH")
-        if [ "$result" = "valid" ]; then
-            LLDB_PYTHON_PATH="$candidate"
-            echo "  ✓ Valid toolchain LLDB found at: $candidate/lldb"
-            break
-        else
-            echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
-        fi
-    fi
+# IMPORTANT: The toolchain may have LLDB bindings for a specific Python version
+# that doesn't match the system Python, so we search for all Python versions
+
+echo "  Searching for valid LLDB Python bindings..."
+echo "  Toolchain: $SWIFT_TOOLCHAIN"
+echo "  System Python version: $PY_VERSION"
+echo "  LD_LIBRARY_PATH: $TOOLCHAIN_LD_PATH"
+
+for py_search_ver in "$PY_VERSION" "3.12" "3.11" "3.10" "3.9" "3"; do
+    for base_path in "$SWIFT_TOOLCHAIN/usr/local/lib" "$SWIFT_TOOLCHAIN/lib" "$SWIFT_TOOLCHAIN/usr/lib"; do
+        for sub_path in "python$py_search_ver/dist-packages" "python$py_search_ver/site-packages"; do
+            candidate="$base_path/$sub_path"
+            if [ -d "$candidate/lldb" ]; then
+                echo "  Checking toolchain LLDB: $candidate/lldb"
+                result=$(validate_lldb_path "$candidate" "$TOOLCHAIN_LD_PATH")
+                if [ "$result" = "valid" ]; then
+                    LLDB_PYTHON_PATH="$candidate"
+                    echo "  ✓ Valid toolchain LLDB found at: $candidate/lldb"
+                    break 3
+                else
+                    echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
+                fi
+            fi
+        done
+    done
 done
 
 # Fall back to system LLDB (without special LD_LIBRARY_PATH)

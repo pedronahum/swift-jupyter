@@ -262,19 +262,31 @@ def install_swift_jupyter():
     # First, try the Swift toolchain's LLDB (preferred for compatibility)
     # Swiftly toolchains have different directory structures
     # The key path for swiftly is: /usr/local/lib/python3.XX/dist-packages
-    swift_lldb_candidates = [
-        # Swiftly toolchain layout - most likely location for swiftly installs
-        f"{swift_toolchain}/usr/local/lib/python{py_ver}/dist-packages",
+    # IMPORTANT: The toolchain may have LLDB bindings for a specific Python version
+    # that doesn't match the system Python, so we search for all Python versions
+    swift_lldb_candidates = []
+
+    # Search for any Python version's LLDB bindings in the toolchain
+    # The toolchain may have been built with a different Python version
+    for py_search_ver in [py_ver, "3.12", "3.11", "3.10", "3.9", "3"]:
+        swift_lldb_candidates.extend([
+            # Swiftly toolchain layout - most likely location for swiftly installs
+            f"{swift_toolchain}/usr/local/lib/python{py_search_ver}/dist-packages",
+            # Standard toolchain layout
+            f"{swift_toolchain}/lib/python{py_search_ver}/site-packages",
+            f"{swift_toolchain}/lib/python{py_search_ver}/dist-packages",
+            # Other swiftly layouts
+            f"{swift_toolchain}/usr/lib/python{py_search_ver}/site-packages",
+            f"{swift_toolchain}/usr/lib/python{py_search_ver}/dist-packages",
+        ])
+    # Also try generic paths
+    swift_lldb_candidates.extend([
         f"{swift_toolchain}/usr/local/lib/python3/dist-packages",
-        # Standard toolchain layout
-        f"{swift_toolchain}/lib/python{py_ver}/site-packages",
-        f"{swift_toolchain}/lib/python{sys.version_info[0]}/dist-packages",
         f"{swift_toolchain}/lib/python3/dist-packages",
-        # Other swiftly layouts
-        f"{swift_toolchain}/usr/lib/python{py_ver}/site-packages",
-        f"{swift_toolchain}/usr/lib/python{sys.version_info[0]}/dist-packages",
         f"{swift_toolchain}/usr/lib/python3/dist-packages",
-    ]
+    ])
+    # Remove duplicates while preserving order
+    swift_lldb_candidates = list(dict.fromkeys(swift_lldb_candidates))
 
     # Then try system LLDB with version-specific paths
     system_candidates = []
@@ -321,27 +333,41 @@ except Exception as e:
         env = os.environ.copy()
         if ld_lib_path:
             env["LD_LIBRARY_PATH"] = ld_lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
-        result = subprocess.run(
-            ['python3', '-c', test_script],
-            capture_output=True, text=True, timeout=15,
-            env=env
-        )
-        return result.stdout.strip() == "valid"
+        try:
+            result = subprocess.run(
+                ['python3', '-c', test_script],
+                capture_output=True, text=True, timeout=15,
+                env=env
+            )
+            output = result.stdout.strip()
+            if output != "valid":
+                # Show what went wrong
+                print(f"    Validation output: {output}")
+                if result.stderr:
+                    print(f"    Validation stderr: {result.stderr[:200]}")
+            return output == "valid"
+        except Exception as e:
+            print(f"    Validation exception: {e}")
+            return False
 
     print("  Searching for valid LLDB Python bindings...")
     print(f"  Toolchain: {swift_toolchain}")
+    print(f"  Python version: {py_ver}")
+    print(f"  LD_LIBRARY_PATH: {toolchain_ld_path}")
 
     # First try toolchain LLDB with proper LD_LIBRARY_PATH
     for candidate in swift_lldb_candidates:
         lldb_path = os.path.join(candidate, "lldb")
-        if os.path.isdir(lldb_path):
-            print(f"  Checking toolchain LLDB: {lldb_path}")
+        exists = os.path.isdir(lldb_path)
+        print(f"  Checking candidate: {candidate} (lldb exists: {exists})")
+        if exists:
+            print(f"  Validating toolchain LLDB: {lldb_path}")
             if validate_lldb_path(candidate, toolchain_ld_path):
                 lldb_python_path = candidate
                 print(f"  ✓ Valid toolchain LLDB found at: {lldb_path}")
                 break
             else:
-                print(f"  ✗ LLDB at {lldb_path} is incomplete or failed validation")
+                print(f"  ✗ LLDB at {lldb_path} failed validation")
 
     # Then try system LLDB (without special LD_LIBRARY_PATH)
     if not lldb_python_path:
