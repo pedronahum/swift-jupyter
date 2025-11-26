@@ -241,7 +241,15 @@ sys.path.insert(0, "$LLDB_PYTHON_PATH")
 os.environ["LD_LIBRARY_PATH"] = "$SWIFT_TOOLCHAIN/lib/swift/linux:$SWIFT_TOOLCHAIN/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
 
 import lldb
-print(f"LLDB module: {lldb.__file__}")
+print(f"LLDB module: {getattr(lldb, '__file__', 'unknown')}")
+
+# Check if SBDebugger exists - this is critical
+if not hasattr(lldb, 'SBDebugger'):
+    print("ERROR: LLDB module is incomplete - missing SBDebugger attribute")
+    print("This indicates the LLDB Python bindings are not properly installed")
+    sys.exit(1)
+
+print("SBDebugger attribute found")
 
 # Test creating a debugger (this is what hangs if LLDB is misconfigured)
 debugger = lldb.SBDebugger.Create()
@@ -274,8 +282,17 @@ if [ $? -eq 0 ]; then
     print_success "LLDB debugger test passed"
     echo "$LLDB_TEST_RESULT" | while read line; do echo "    $line"; done
 else
-    print_warning "LLDB debugger test failed or timed out:"
-    echo "$LLDB_TEST_RESULT" | head -10
+    print_error "LLDB debugger test FAILED:"
+    echo "$LLDB_TEST_RESULT" | head -15
+    echo ""
+    print_warning "The LLDB Python bindings are incomplete or missing."
+    echo "    This is a known issue with system python3-lldb packages."
+    echo "    The kernel will NOT work until this is fixed."
+    echo ""
+    echo "    Possible solutions:"
+    echo "    1. Use Swift toolchain's bundled LLDB (if available)"
+    echo "    2. Install a different python3-lldb version"
+    echo "    3. Build LLDB from source with Python support"
 fi
 
 # Step 7: Register the Swift kernel

@@ -226,9 +226,12 @@ def install_swift_jupyter():
     else:
         print_success(f"LLDB Python path: {lldb_python_path}")
 
-    # Verify LLDB can be imported AND create a debugger (this is what the kernel does)
+    # Verify LLDB can be imported AND has required attributes (SBDebugger)
+    # The system python3-lldb-XX packages often have incomplete bindings
     print("  Testing LLDB import and debugger creation...")
-    lldb_test_script = f'''
+
+    # First, verify the LLDB module has SBDebugger
+    lldb_validation_script = f'''
 import sys
 import os
 sys.path.insert(0, "{lldb_python_path}")
@@ -237,7 +240,15 @@ sys.path.insert(0, "{lldb_python_path}")
 os.environ["LD_LIBRARY_PATH"] = "{swift_toolchain}/lib/swift/linux:{swift_toolchain}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
 
 import lldb
-print(f"LLDB module: {{lldb.__file__}}")
+print(f"LLDB module: {{getattr(lldb, '__file__', 'unknown')}}")
+
+# Check if SBDebugger exists - this is critical
+if not hasattr(lldb, 'SBDebugger'):
+    print("ERROR: LLDB module is incomplete - missing SBDebugger attribute")
+    print("This indicates the LLDB Python bindings are not properly installed")
+    sys.exit(1)
+
+print("SBDebugger attribute found")
 
 # Test creating a debugger (this is what hangs if LLDB is misconfigured)
 debugger = lldb.SBDebugger.Create()
@@ -265,7 +276,7 @@ else:
     sys.exit(1)
 '''
     test_result = subprocess.run(
-        ['python3', '-c', lldb_test_script],
+        ['python3', '-c', lldb_validation_script],
         capture_output=True, text=True, timeout=30
     )
     if test_result.returncode == 0:
@@ -273,9 +284,18 @@ else:
         for line in test_result.stdout.strip().split('\n'):
             print(f"    {line}")
     else:
-        print_warning(f"LLDB debugger test failed:")
-        print(f"    stdout: {test_result.stdout[:300]}")
-        print(f"    stderr: {test_result.stderr[:300]}")
+        print_error(f"LLDB debugger test FAILED:")
+        print(f"    stdout: {test_result.stdout[:500]}")
+        print(f"    stderr: {test_result.stderr[:500]}")
+        print("")
+        print_warning("The LLDB Python bindings are incomplete or missing.")
+        print("    This is a known issue with system python3-lldb packages.")
+        print("    The kernel will NOT work until this is fixed.")
+        print("")
+        print("    Possible solutions:")
+        print("    1. Use Swift toolchain's bundled LLDB (if available)")
+        print("    2. Install a different python3-lldb version")
+        print("    3. Build LLDB from source with Python support")
 
     # Step 7: Register kernel
     print_step("Registering Swift Jupyter kernel...")

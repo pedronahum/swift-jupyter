@@ -1163,7 +1163,23 @@ class SwiftKernel(Kernel):
 
         self.log.info('Step 1: Importing lldb module...')
         import lldb
-        self.log.info(f'Step 1 complete: lldb module loaded from {lldb.__file__}')
+        self.log.info(f'Step 1 complete: lldb module loaded from {getattr(lldb, "__file__", "unknown")}')
+
+        # Validate that the LLDB module has the required attributes
+        if not hasattr(lldb, 'SBDebugger'):
+            error_msg = (
+                "LLDB Python module is incomplete - missing SBDebugger.\n\n"
+                "This usually means the wrong LLDB Python bindings are being used.\n"
+                f"LLDB module path: {getattr(lldb, '__file__', 'unknown')}\n"
+                f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'NOT SET')}\n\n"
+                "💡 Troubleshooting:\n"
+                "   • Ensure python3-lldb-15 (or compatible) is installed\n"
+                "   • Check that PYTHONPATH points to the correct LLDB bindings\n"
+                "   • The Swift toolchain's LLDB is preferred over system LLDB\n"
+                "   • Try: apt-get install python3-lldb-15\n"
+            )
+            self.log.error(error_msg)
+            raise Exception(error_msg)
 
         self.log.info('Step 2: Creating SBDebugger...')
         self.debugger = lldb.SBDebugger.Create()
