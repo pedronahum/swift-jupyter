@@ -192,53 +192,121 @@ print_step "Configuring LLDB Python bindings..."
 # Get Python version
 PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')
 
-# Find the LLDB Python path - try Swift toolchain first, then system
-LLDB_PYTHON_PATH=""
-
-# Try Swift toolchain's LLDB first (most compatible)
-for candidate in "$SWIFT_TOOLCHAIN/lib/python$PY_VERSION/site-packages" \
-                 "$SWIFT_TOOLCHAIN/lib/python3/dist-packages"; do
-    if [ -d "$candidate/lldb" ]; then
-        LLDB_PYTHON_PATH="$candidate"
-        echo "  Found Swift toolchain LLDB at: $candidate/lldb"
-        break
+# Build LD_LIBRARY_PATH for the toolchain (needed for LLDB to load Swift libs)
+# The toolchain's LLDB requires these paths to load liblldb.so and Swift runtime
+TOOLCHAIN_LD_PATH=""
+for path in "$SWIFT_TOOLCHAIN/usr/lib" \
+            "$SWIFT_TOOLCHAIN/usr/lib/swift/linux" \
+            "$SWIFT_TOOLCHAIN/usr/lib/swift/host/compiler" \
+            "$SWIFT_TOOLCHAIN/lib" \
+            "$SWIFT_TOOLCHAIN/lib/swift/linux"; do
+    if [ -d "$path" ]; then
+        if [ -n "$TOOLCHAIN_LD_PATH" ]; then
+            TOOLCHAIN_LD_PATH="$TOOLCHAIN_LD_PATH:$path"
+        else
+            TOOLCHAIN_LD_PATH="$path"
+        fi
     fi
 done
 
-# Fall back to system LLDB
-if [ -z "$LLDB_PYTHON_PATH" ]; then
-    for version in 18 17 16 15 14; do
-        candidate="/usr/lib/python3/dist-packages"
-        if [ -d "$candidate/lldb" ]; then
+# Find the LLDB Python path - try Swift toolchain first, then system
+LLDB_PYTHON_PATH=""
+
+echo "  Searching for valid LLDB Python bindings..."
+echo "  Toolchain: $SWIFT_TOOLCHAIN"
+
+# Helper function to validate LLDB module has SBDebugger
+validate_lldb_path() {
+    local path="$1"
+    local ld_path="$2"
+    LD_LIBRARY_PATH="$ld_path:$LD_LIBRARY_PATH" python3 -c "
+import sys
+sys.path.insert(0, '$path')
+import lldb
+if hasattr(lldb, 'SBDebugger'):
+    debugger = lldb.SBDebugger.Create()
+    if debugger:
+        lldb.SBDebugger.Destroy(debugger)
+        print('valid')
+    else:
+        print('incomplete-create-failed')
+else:
+    print('incomplete-no-sbdebugger')
+" 2>/dev/null
+}
+
+# Try Swift toolchain's LLDB first (most compatible)
+# Swiftly toolchains have lldb under usr/local/lib/pythonX.Y/dist-packages
+for candidate in "$SWIFT_TOOLCHAIN/usr/local/lib/python$PY_VERSION/dist-packages" \
+                 "$SWIFT_TOOLCHAIN/usr/local/lib/python3/dist-packages" \
+                 "$SWIFT_TOOLCHAIN/lib/python$PY_VERSION/site-packages" \
+                 "$SWIFT_TOOLCHAIN/lib/python3/dist-packages"; do
+    if [ -d "$candidate/lldb" ]; then
+        echo "  Checking toolchain LLDB: $candidate/lldb"
+        result=$(validate_lldb_path "$candidate" "$TOOLCHAIN_LD_PATH")
+        if [ "$result" = "valid" ]; then
             LLDB_PYTHON_PATH="$candidate"
-            echo "  Found system LLDB at: $candidate/lldb"
+            echo "  ✓ Valid toolchain LLDB found at: $candidate/lldb"
             break
+        else
+            echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
         fi
-        candidate="/usr/lib/llvm-$version/lib/python$PY_VERSION/dist-packages"
+    fi
+done
+
+# Fall back to system LLDB (without special LD_LIBRARY_PATH)
+if [ -z "$LLDB_PYTHON_PATH" ]; then
+    for candidate in "/usr/lib/python3/dist-packages"; do
         if [ -d "$candidate/lldb" ]; then
-            LLDB_PYTHON_PATH="$candidate"
-            echo "  Found LLVM-$version LLDB at: $candidate/lldb"
-            break
+            echo "  Checking system LLDB: $candidate/lldb"
+            result=$(validate_lldb_path "$candidate" "")
+            if [ "$result" = "valid" ]; then
+                LLDB_PYTHON_PATH="$candidate"
+                echo "  ✓ Valid system LLDB found at: $candidate/lldb"
+                break
+            else
+                echo "  ✗ LLDB at $candidate/lldb failed validation: $result"
+            fi
+        fi
+    done
+fi
+
+# If still not found, search the toolchain for lldb directories
+if [ -z "$LLDB_PYTHON_PATH" ]; then
+    echo ""
+    print_warning "Could not find complete LLDB Python bindings"
+    echo "  Searching for lldb directories in toolchain..."
+
+    for lldb_dir in $(find "$SWIFT_TOOLCHAIN" -type d -name "lldb" 2>/dev/null); do
+        if [ -f "$lldb_dir/__init__.py" ]; then
+            parent=$(dirname "$lldb_dir")
+            echo "    Found Python package: $lldb_dir (parent: $parent)"
+            result=$(validate_lldb_path "$parent" "$TOOLCHAIN_LD_PATH")
+            if [ "$result" = "valid" ]; then
+                LLDB_PYTHON_PATH="$parent"
+                print_success "Found working LLDB at: $parent"
+                break
+            else
+                echo "    → Failed validation: $result"
+            fi
         fi
     done
 fi
 
 if [ -z "$LLDB_PYTHON_PATH" ]; then
-    print_warning "Could not find LLDB Python bindings automatically"
+    print_warning "Could not find working LLDB, defaulting to /usr/lib/python3/dist-packages"
+    print_warning "The kernel may not work correctly!"
     LLDB_PYTHON_PATH="/usr/lib/python3/dist-packages"
+else
+    print_success "LLDB Python path: $LLDB_PYTHON_PATH"
 fi
-
-print_success "LLDB Python path: $LLDB_PYTHON_PATH"
 
 # Test LLDB import AND debugger creation (this is what the kernel does)
 echo "  Testing LLDB import and debugger creation..."
-LLDB_TEST_RESULT=$(timeout 30 python3 << LLDB_TEST_EOF
+LLDB_TEST_RESULT=$(LD_LIBRARY_PATH="$TOOLCHAIN_LD_PATH:$LD_LIBRARY_PATH" timeout 30 python3 << LLDB_TEST_EOF
 import sys
 import os
 sys.path.insert(0, "$LLDB_PYTHON_PATH")
-
-# Set LD_LIBRARY_PATH for Swift libs
-os.environ["LD_LIBRARY_PATH"] = "$SWIFT_TOOLCHAIN/lib/swift/linux:$SWIFT_TOOLCHAIN/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
 
 import lldb
 print(f"LLDB module: {getattr(lldb, '__file__', 'unknown')}")
@@ -258,7 +326,10 @@ if debugger:
     debugger.SetAsync(False)
 
     # Test creating a target with repl_swift
-    repl_swift = "$SWIFT_TOOLCHAIN/bin/repl_swift"
+    # Check both possible locations for repl_swift
+    repl_swift = "$SWIFT_TOOLCHAIN/usr/bin/repl_swift"
+    if not os.path.exists(repl_swift):
+        repl_swift = "$SWIFT_TOOLCHAIN/bin/repl_swift"
     if os.path.exists(repl_swift):
         import platform
         arch = platform.machine()
@@ -268,7 +339,7 @@ if debugger:
         else:
             print(f"WARNING: Could not create target for {repl_swift}")
     else:
-        print(f"WARNING: repl_swift not found at {repl_swift}")
+        print(f"WARNING: repl_swift not found")
 
     lldb.SBDebugger.Destroy(debugger)
     print("Debugger destroyed successfully")
@@ -304,12 +375,36 @@ cd "$INSTALL_DIR"
 KERNEL_DIR="/usr/local/share/jupyter/kernels/swift"
 mkdir -p "$KERNEL_DIR"
 
-# Find swift-build and swift-package paths
-SWIFT_BUILD_PATH="$SWIFT_TOOLCHAIN/bin/swift-build"
-SWIFT_PACKAGE_PATH="$SWIFT_TOOLCHAIN/bin/swift-package"
+# Determine correct bin paths (swiftly uses usr/bin, standard uses bin)
+# Find repl_swift - needed for the kernel
+if [ -f "$SWIFT_TOOLCHAIN/usr/bin/repl_swift" ]; then
+    REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN/usr/bin/repl_swift"
+    TOOLCHAIN_BIN="$SWIFT_TOOLCHAIN/usr/bin"
+elif [ -f "$SWIFT_TOOLCHAIN/bin/repl_swift" ]; then
+    REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN/bin/repl_swift"
+    TOOLCHAIN_BIN="$SWIFT_TOOLCHAIN/bin"
+else
+    print_error "Could not find repl_swift in toolchain"
+    REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN/usr/bin/repl_swift"
+    TOOLCHAIN_BIN="$SWIFT_TOOLCHAIN/usr/bin"
+fi
 
-# Build comprehensive LD_LIBRARY_PATH
-LD_LIB_PATH="$SWIFT_TOOLCHAIN/lib/swift/linux:$SWIFT_TOOLCHAIN/lib:/usr/lib/x86_64-linux-gnu"
+# Find swift-build and swift-package paths
+if [ -f "$TOOLCHAIN_BIN/swift-build" ]; then
+    SWIFT_BUILD_PATH="$TOOLCHAIN_BIN/swift-build"
+else
+    SWIFT_BUILD_PATH="$SWIFT_TOOLCHAIN/usr/bin/swift-build"
+fi
+
+if [ -f "$TOOLCHAIN_BIN/swift-package" ]; then
+    SWIFT_PACKAGE_PATH="$TOOLCHAIN_BIN/swift-package"
+else
+    SWIFT_PACKAGE_PATH="$SWIFT_TOOLCHAIN/usr/bin/swift-package"
+fi
+
+# Use the comprehensive TOOLCHAIN_LD_PATH we built earlier
+# Add system library path as well
+LD_LIB_PATH="$TOOLCHAIN_LD_PATH:/usr/lib/x86_64-linux-gnu"
 
 # Create kernel.json
 cat > "$KERNEL_DIR/kernel.json" << EOF
@@ -323,10 +418,10 @@ cat > "$KERNEL_DIR/kernel.json" << EOF
   "language": "swift",
   "env": {
     "PYTHONPATH": "$LLDB_PYTHON_PATH:$INSTALL_DIR",
-    "REPL_SWIFT_PATH": "$SWIFT_TOOLCHAIN/bin/repl_swift",
+    "REPL_SWIFT_PATH": "$REPL_SWIFT_PATH",
     "SWIFT_BUILD_PATH": "$SWIFT_BUILD_PATH",
     "SWIFT_PACKAGE_PATH": "$SWIFT_PACKAGE_PATH",
-    "PATH": "$SWIFT_TOOLCHAIN/bin:$PATH",
+    "PATH": "$TOOLCHAIN_BIN:$PATH",
     "LD_LIBRARY_PATH": "$LD_LIB_PATH",
     "SWIFT_TOOLCHAIN": "$SWIFT_TOOLCHAIN",
     "SWIFT_TOOLCHAIN_ROOT": "$SWIFT_TOOLCHAIN"
@@ -354,8 +449,7 @@ else
     print_error "Swift kernel not found - registration may have failed"
 fi
 
-# Test repl_swift binary
-REPL_SWIFT_PATH="$SWIFT_TOOLCHAIN/bin/repl_swift"
+# Test repl_swift binary (already found earlier)
 echo "  Checking repl_swift binary..."
 if [ -f "$REPL_SWIFT_PATH" ]; then
     print_success "repl_swift found at $REPL_SWIFT_PATH"
@@ -366,11 +460,7 @@ if [ -f "$REPL_SWIFT_PATH" ]; then
     fi
 else
     print_error "repl_swift NOT found at $REPL_SWIFT_PATH"
-    # Try to find it elsewhere
-    ALT_PATH="$SWIFT_TOOLCHAIN/usr/bin/repl_swift"
-    if [ -f "$ALT_PATH" ]; then
-        print_warning "Found repl_swift at alternative location: $ALT_PATH"
-    fi
+    echo "  The kernel will NOT work without repl_swift"
 fi
 
 # Test kernel import

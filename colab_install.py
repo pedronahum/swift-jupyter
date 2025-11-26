@@ -194,35 +194,150 @@ def install_swift_jupyter():
     print_step("Configuring LLDB Python bindings...")
 
     lldb_python_path = None
+    py_ver = f"{sys.version_info[0]}.{sys.version_info[1]}"
+
+    # Build LD_LIBRARY_PATH for the toolchain (needed for LLDB to load Swift libs)
+    # The toolchain's LLDB requires these paths to load liblldb.so and Swift runtime
+    toolchain_lib_paths = [
+        f"{swift_toolchain}/usr/lib",                      # liblldb.so location
+        f"{swift_toolchain}/usr/lib/swift/linux",          # Swift runtime
+        f"{swift_toolchain}/usr/lib/swift/host/compiler",  # Compiler libs (for main-snapshot)
+        f"{swift_toolchain}/lib",                          # Alternative layout
+        f"{swift_toolchain}/lib/swift/linux",              # Alternative layout
+    ]
+    toolchain_ld_path = ":".join(p for p in toolchain_lib_paths if os.path.exists(p))
 
     # First, try the Swift toolchain's LLDB (preferred for compatibility)
+    # Swiftly toolchains have different directory structures
+    # The key path for swiftly is: /usr/local/lib/python3.XX/dist-packages
     swift_lldb_candidates = [
-        f"{swift_toolchain}/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages",
+        # Swiftly toolchain layout - most likely location for swiftly installs
+        f"{swift_toolchain}/usr/local/lib/python{py_ver}/dist-packages",
+        f"{swift_toolchain}/usr/local/lib/python3/dist-packages",
+        # Standard toolchain layout
+        f"{swift_toolchain}/lib/python{py_ver}/site-packages",
         f"{swift_toolchain}/lib/python{sys.version_info[0]}/dist-packages",
         f"{swift_toolchain}/lib/python3/dist-packages",
+        # Other swiftly layouts
+        f"{swift_toolchain}/usr/lib/python{py_ver}/site-packages",
+        f"{swift_toolchain}/usr/lib/python{sys.version_info[0]}/dist-packages",
+        f"{swift_toolchain}/usr/lib/python3/dist-packages",
     ]
 
-    # Then try system LLDB
-    system_candidates = [
-        "/usr/lib/python3/dist-packages",
-        f"/usr/lib/llvm-18/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
-        f"/usr/lib/llvm-17/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
-        f"/usr/lib/llvm-16/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
-        f"/usr/lib/llvm-15/lib/python{sys.version_info[0]}.{sys.version_info[1]}/dist-packages",
-    ]
+    # Then try system LLDB with version-specific paths
+    system_candidates = []
+    for llvm_ver in [18, 17, 16, 15, 14]:
+        system_candidates.extend([
+            f"/usr/lib/llvm-{llvm_ver}/lib/python{py_ver}/dist-packages",
+            f"/usr/lib/llvm-{llvm_ver}/lib/python3/dist-packages",
+            f"/usr/lib/llvm-{llvm_ver}/python{py_ver}/dist-packages",
+        ])
+    # Generic system path (last resort)
+    system_candidates.append("/usr/lib/python3/dist-packages")
 
     all_candidates = swift_lldb_candidates + system_candidates
 
-    for candidate in all_candidates:
+    # Helper function to validate LLDB module has SBDebugger
+    def validate_lldb_path(path, ld_lib_path=""):
+        """Check if the LLDB module at path has SBDebugger.
+
+        Args:
+            path: Python path containing lldb module
+            ld_lib_path: LD_LIBRARY_PATH needed for native libs
+        """
+        test_script = f'''
+import sys
+import os
+sys.path.insert(0, "{path}")
+if "{ld_lib_path}":
+    os.environ["LD_LIBRARY_PATH"] = "{ld_lib_path}:" + os.environ.get("LD_LIBRARY_PATH", "")
+try:
+    import lldb
+    if hasattr(lldb, 'SBDebugger'):
+        # Also verify we can create a debugger
+        debugger = lldb.SBDebugger.Create()
+        if debugger:
+            lldb.SBDebugger.Destroy(debugger)
+            print("valid")
+        else:
+            print("incomplete-create-failed")
+    else:
+        print("incomplete-no-sbdebugger")
+except Exception as e:
+    print(f"error: {{e}}")
+'''
+        env = os.environ.copy()
+        if ld_lib_path:
+            env["LD_LIBRARY_PATH"] = ld_lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
+        result = subprocess.run(
+            ['python3', '-c', test_script],
+            capture_output=True, text=True, timeout=15,
+            env=env
+        )
+        return result.stdout.strip() == "valid"
+
+    print("  Searching for valid LLDB Python bindings...")
+    print(f"  Toolchain: {swift_toolchain}")
+
+    # First try toolchain LLDB with proper LD_LIBRARY_PATH
+    for candidate in swift_lldb_candidates:
         lldb_path = os.path.join(candidate, "lldb")
         if os.path.isdir(lldb_path):
-            lldb_python_path = candidate
-            print(f"  Found LLDB at: {lldb_path}")
-            break
+            print(f"  Checking toolchain LLDB: {lldb_path}")
+            if validate_lldb_path(candidate, toolchain_ld_path):
+                lldb_python_path = candidate
+                print(f"  ✓ Valid toolchain LLDB found at: {lldb_path}")
+                break
+            else:
+                print(f"  ✗ LLDB at {lldb_path} is incomplete or failed validation")
+
+    # Then try system LLDB (without special LD_LIBRARY_PATH)
+    if not lldb_python_path:
+        for candidate in system_candidates:
+            lldb_path = os.path.join(candidate, "lldb")
+            if os.path.isdir(lldb_path):
+                print(f"  Checking system LLDB: {lldb_path}")
+                if validate_lldb_path(candidate, ""):
+                    lldb_python_path = candidate
+                    print(f"  ✓ Valid system LLDB found at: {lldb_path}")
+                    break
+                else:
+                    print(f"  ✗ LLDB at {lldb_path} is incomplete or failed validation")
+
+    # If still not found, list what's in the toolchain for debugging
+    if not lldb_python_path:
+        print("")
+        print_warning("Could not find complete LLDB Python bindings")
+        print(f"  Searching for lldb directories in toolchain...")
+
+        # Search for lldb directories in the toolchain
+        found_lldb_dirs = []
+        for root, dirs, files in os.walk(swift_toolchain):
+            if 'lldb' in dirs:
+                lldb_dir = os.path.join(root, 'lldb')
+                found_lldb_dirs.append(lldb_dir)
+                print(f"    Found: {lldb_dir}")
+                # Check if it has __init__.py (Python package)
+                init_file = os.path.join(lldb_dir, '__init__.py')
+                if os.path.exists(init_file):
+                    parent = os.path.dirname(lldb_dir)
+                    print(f"    → This is a Python package, parent: {parent}")
+                    # Try validating with toolchain LD_LIBRARY_PATH
+                    if validate_lldb_path(parent, toolchain_ld_path):
+                        lldb_python_path = parent
+                        print_success(f"Found working LLDB at: {parent}")
+                        break
+
+        if not lldb_python_path and found_lldb_dirs:
+            print_warning("Found LLDB directories but none passed validation")
+            print(f"  This may indicate missing native libraries")
+            print(f"  LD_LIBRARY_PATH tried: {toolchain_ld_path}")
 
     if not lldb_python_path:
+        # Last resort: use system path even though it might not work
         lldb_python_path = "/usr/lib/python3/dist-packages"
-        print_warning(f"Could not find LLDB, defaulting to {lldb_python_path}")
+        print_warning(f"Could not find working LLDB, defaulting to {lldb_python_path}")
+        print_warning("The kernel may not work correctly!")
     else:
         print_success(f"LLDB Python path: {lldb_python_path}")
 
@@ -236,8 +351,8 @@ import sys
 import os
 sys.path.insert(0, "{lldb_python_path}")
 
-# Set LD_LIBRARY_PATH for Swift libs
-os.environ["LD_LIBRARY_PATH"] = "{swift_toolchain}/lib/swift/linux:{swift_toolchain}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+# Set LD_LIBRARY_PATH for Swift libs (comprehensive path for toolchain LLDB)
+os.environ["LD_LIBRARY_PATH"] = "{toolchain_ld_path}:" + os.environ.get("LD_LIBRARY_PATH", "")
 
 import lldb
 print(f"LLDB module: {{getattr(lldb, '__file__', 'unknown')}}")
@@ -303,13 +418,43 @@ else:
     kernel_dir = "/usr/local/share/jupyter/kernels/swift"
     os.makedirs(kernel_dir, exist_ok=True)
 
-    # Build comprehensive LD_LIBRARY_PATH
+    # Build comprehensive LD_LIBRARY_PATH for kernel runtime
+    # This must include all paths needed for toolchain LLDB to work
     ld_library_paths = [
-        f"{swift_toolchain}/lib/swift/linux",
-        f"{swift_toolchain}/lib",
-        "/usr/lib/x86_64-linux-gnu",
+        f"{swift_toolchain}/usr/lib",                      # liblldb.so for swiftly toolchains
+        f"{swift_toolchain}/usr/lib/swift/linux",          # Swift runtime for swiftly
+        f"{swift_toolchain}/usr/lib/swift/host/compiler",  # Compiler libs for main-snapshot
+        f"{swift_toolchain}/lib",                          # Alternative layout
+        f"{swift_toolchain}/lib/swift/linux",              # Alternative Swift runtime
+        "/usr/lib/x86_64-linux-gnu",                       # System libs
     ]
-    ld_library_path = ":".join(ld_library_paths)
+    # Only include paths that exist
+    ld_library_path = ":".join(p for p in ld_library_paths if os.path.exists(p))
+
+    # Determine correct bin paths (swiftly uses usr/bin, standard uses bin)
+    # Find repl_swift - needed for the kernel
+    repl_swift_candidates = [
+        f"{swift_toolchain}/usr/bin/repl_swift",  # Swiftly layout
+        f"{swift_toolchain}/bin/repl_swift",       # Standard layout
+    ]
+    repl_swift_path = next((p for p in repl_swift_candidates if os.path.exists(p)), repl_swift_candidates[0])
+
+    # Find swift-build
+    swift_build_candidates = [
+        f"{swift_toolchain}/usr/bin/swift-build",
+        f"{swift_toolchain}/bin/swift-build",
+    ]
+    swift_build_path = next((p for p in swift_build_candidates if os.path.exists(p)), swift_build_candidates[0])
+
+    # Find swift-package
+    swift_package_candidates = [
+        f"{swift_toolchain}/usr/bin/swift-package",
+        f"{swift_toolchain}/bin/swift-package",
+    ]
+    swift_package_path = next((p for p in swift_package_candidates if os.path.exists(p)), swift_package_candidates[0])
+
+    # Determine bin directory
+    toolchain_bin = os.path.dirname(repl_swift_path)
 
     kernel_json = {
         "argv": [
@@ -321,10 +466,10 @@ else:
         "language": "swift",
         "env": {
             "PYTHONPATH": f"{lldb_python_path}:{INSTALL_DIR}",
-            "REPL_SWIFT_PATH": f"{swift_toolchain}/bin/repl_swift",
-            "SWIFT_BUILD_PATH": f"{swift_toolchain}/bin/swift-build",
-            "SWIFT_PACKAGE_PATH": f"{swift_toolchain}/bin/swift-package",
-            "PATH": f"{swift_toolchain}/bin:{swiftly_bin}:{os.environ['PATH']}",
+            "REPL_SWIFT_PATH": repl_swift_path,
+            "SWIFT_BUILD_PATH": swift_build_path,
+            "SWIFT_PACKAGE_PATH": swift_package_path,
+            "PATH": f"{toolchain_bin}:{swiftly_bin}:{os.environ['PATH']}",
             "LD_LIBRARY_PATH": ld_library_path,
             "SWIFT_TOOLCHAIN": swift_toolchain,
             "SWIFT_TOOLCHAIN_ROOT": swift_toolchain  # Used by kernel for pre-loading libs
@@ -352,7 +497,6 @@ else:
         print_error("Swift kernel not found")
 
     # Test repl_swift binary exists and is executable
-    repl_swift_path = f"{swift_toolchain}/bin/repl_swift"
     print(f"  Checking repl_swift binary...")
     if os.path.exists(repl_swift_path):
         print_success(f"repl_swift found at {repl_swift_path}")
@@ -363,15 +507,7 @@ else:
             print_warning("repl_swift is not executable")
     else:
         print_error(f"repl_swift NOT found at {repl_swift_path}")
-        # Try to find it elsewhere
-        alt_paths = [
-            f"{swift_toolchain}/usr/bin/repl_swift",
-            os.path.expanduser("~/.local/share/swiftly/bin/repl_swift"),
-        ]
-        for alt in alt_paths:
-            if os.path.exists(alt):
-                print_warning(f"Found repl_swift at alternative location: {alt}")
-                break
+        print("  The kernel will NOT work without repl_swift")
 
     # Test kernel import
     print("  Testing kernel import...")
