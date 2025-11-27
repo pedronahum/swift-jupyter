@@ -172,12 +172,32 @@ def install_swift_jupyter():
     for snapshot in snapshots_to_try:
         try:
             print(f"  Trying {snapshot}...")
+            # Run swiftly install - it may return non-zero for dependency warnings even when successful
             result = subprocess.run(
                 f"{swiftly_bin}/swiftly install {snapshot} -y",
                 shell=True, capture_output=True, text=True
             )
-            if result.returncode == 0:
-                run(f"{swiftly_bin}/swiftly use {snapshot}")
+
+            # Check if toolchain was actually installed despite any warnings
+            # Swiftly stores toolchains in ~/.local/share/swiftly/toolchains/
+            toolchain_dir = os.path.join(swiftly_home, "toolchains")
+            installed_toolchain = None
+            if os.path.isdir(toolchain_dir):
+                for name in os.listdir(toolchain_dir):
+                    if snapshot in name:
+                        candidate = os.path.join(toolchain_dir, name)
+                        if os.path.isfile(os.path.join(candidate, "usr", "bin", "swift")):
+                            installed_toolchain = candidate
+                            break
+
+            if installed_toolchain:
+                print(f"  Toolchain found at: {installed_toolchain}")
+                run(f"{swiftly_bin}/swiftly use {snapshot}", check=False)
+                swift_installed = True
+                print_success(f"Swift {snapshot} installed")
+                break
+            elif result.returncode == 0:
+                run(f"{swiftly_bin}/swiftly use {snapshot}", check=False)
                 swift_installed = True
                 print_success(f"Swift {snapshot} installed")
                 break

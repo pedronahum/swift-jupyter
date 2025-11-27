@@ -168,8 +168,23 @@ swiftly list-available --platform ubuntu2204 2>/dev/null | head -10 || true
 SWIFT_INSTALLED=false
 for snapshot in "$SWIFT_SNAPSHOT" "${SWIFT_SNAPSHOT}a" "main-snapshot" "6.1-snapshot"; do
     echo "  Trying $snapshot..."
-    if swiftly install "$snapshot" -y 2>&1; then
-        swiftly use "$snapshot" 2>/dev/null
+    # Run swiftly install - it may return non-zero for dependency warnings even when successful
+    swiftly install "$snapshot" -y 2>&1 || true
+
+    # Check if the toolchain was actually installed by looking for it
+    # Swiftly stores toolchains in ~/.local/share/swiftly/toolchains/
+    INSTALLED_TOOLCHAIN=$(ls -d "$SWIFTLY_HOME/toolchains"/*"$snapshot"* 2>/dev/null | head -1)
+
+    # Also check swiftly list for the installed toolchain
+    if [ -n "$INSTALLED_TOOLCHAIN" ] && [ -f "$INSTALLED_TOOLCHAIN/usr/bin/swift" ]; then
+        echo "  Toolchain found at: $INSTALLED_TOOLCHAIN"
+        swiftly use "$snapshot" 2>/dev/null || true
+        SWIFT_INSTALLED=true
+        print_success "Swift $snapshot installed"
+        break
+    elif swiftly list 2>/dev/null | grep -q "$snapshot"; then
+        # Toolchain is in swiftly's list, try to use it
+        swiftly use "$snapshot" 2>/dev/null || true
         SWIFT_INSTALLED=true
         print_success "Swift $snapshot installed"
         break
