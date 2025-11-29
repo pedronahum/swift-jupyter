@@ -644,7 +644,339 @@ class StdoutHandler(threading.Thread):
             self.kernel.log.error('Exception in StdoutHandler: %s' % str(e))
 
 
-class SwiftKernel(Kernel):
+
+# =============================================================================
+# SwiftIR Directives Mixin - Pre-compiled Library Support
+# Added by integrate_swiftir.py
+# =============================================================================
+
+class SwiftIRDirectivesMixin:
+    """
+    Mixin class providing pre-compiled library support directives.
+    
+    Adds support for:
+    - %swift_flags: Add custom compiler flags
+    - %swift_library_path: Add to LD_LIBRARY_PATH
+    - %swift_module_path: Add Swift module search paths
+    - %swift_env: Set environment variables  
+    - %swift_link: Link specific libraries
+    - %swiftir_setup: One-line SwiftIR SDK setup
+    - %swift_framework_path: Add framework search paths (macOS)
+    - %swift_config: Show current configuration
+    """
+    
+    def _init_swiftir_directives(self):
+        """Initialize SwiftIR directive state. Called from __init__."""
+        self.custom_swift_flags = []
+        self.custom_library_paths = []
+        self.custom_module_paths = []
+        self.custom_framework_paths = []
+        self.custom_env_vars = {}
+    
+    def _process_swiftir_directive(self, code):
+        """Check if code contains a SwiftIR directive and process it."""
+        stripped = code.strip()
+        
+        match = re.match(r'^%swiftir_setup\s+(.+)$', stripped)
+        if match:
+            self._handle_swiftir_setup(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_flags\s+(.+)$', stripped, re.DOTALL)
+        if match:
+            self._handle_swift_flags(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_library_path\s+(.+)$', stripped)
+        if match:
+            self._handle_swift_library_path(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_module_path\s+(.+)$', stripped)
+        if match:
+            self._handle_swift_module_path(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_env\s+(.+)$', stripped)
+        if match:
+            self._handle_swift_env(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_link\s+(.+)$', stripped)
+        if match:
+            self._handle_swift_link(match.group(1))
+            return (True, '')
+        
+        match = re.match(r'^%swift_framework_path\s+(.+)$', stripped)
+        if match:
+            self._handle_swift_framework_path(match.group(1))
+            return (True, '')
+        
+        if stripped == '%swift_config':
+            self._handle_swift_config()
+            return (True, '')
+        
+        return (False, None)
+    
+    def _handle_swift_flags(self, flags_str):
+        """Handle %swift_flags directive."""
+        try:
+            flags = shlex.split(flags_str)
+            for i, flag in enumerate(flags):
+                self.custom_swift_flags.append(flag)
+                if flag.startswith('-I') and len(flag) > 2:
+                    path = flag[2:]
+                    if os.path.isdir(path):
+                        self._add_custom_module_path(path)
+                if flag.startswith('-L') and len(flag) > 2:
+                    path = flag[2:]
+                    if os.path.isdir(path):
+                        self._add_custom_library_path(path)
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'✅ Added compiler flags: {" ".join(flags)}\n'
+            })
+        except Exception as e:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stderr',
+                'text': f'❌ Error parsing swift_flags: {e}\n'
+            })
+    
+    def _handle_swift_library_path(self, path_str):
+        """Handle %swift_library_path directive."""
+        paths = path_str.strip().split(':')
+        added = []
+        for path in paths:
+            path = os.path.expanduser(path.strip())
+            if not path:
+                continue
+            if os.path.isdir(path):
+                self._add_custom_library_path(path)
+                added.append(path)
+            else:
+                self.send_response(self.iopub_socket, 'stream', {
+                    'name': 'stderr',
+                    'text': f'⚠️  Path does not exist: {path}\n'
+                })
+        if added:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'✅ Added library paths: {":".join(added)}\n'
+            })
+    
+    def _handle_swift_module_path(self, path_str):
+        """Handle %swift_module_path directive."""
+        paths = path_str.strip().split(':')
+        added = []
+        for path in paths:
+            path = os.path.expanduser(path.strip())
+            if not path:
+                continue
+            if os.path.isdir(path):
+                self._add_custom_module_path(path)
+                added.append(path)
+            else:
+                self.send_response(self.iopub_socket, 'stream', {
+                    'name': 'stderr',
+                    'text': f'⚠️  Path does not exist: {path}\n'
+                })
+        if added:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'✅ Added module paths: {":".join(added)}\n'
+            })
+    
+    def _handle_swift_env(self, env_str):
+        """Handle %swift_env directive."""
+        if '=' not in env_str:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stderr',
+                'text': '❌ Invalid format. Use: %swift_env NAME=value\n'
+            })
+            return
+        try:
+            name, value = env_str.strip().split('=', 1)
+            name = name.strip()
+            value = os.path.expanduser(value.strip())
+            self.custom_env_vars[name] = value
+            os.environ[name] = value
+            if hasattr(self, 'debugger') and self.debugger:
+                self.debugger.HandleCommand(f'settings append target.env-vars {name}={value}')
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'✅ Set environment: {name}={value}\n'
+            })
+        except Exception as e:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stderr',
+                'text': f'❌ Error setting environment: {e}\n'
+            })
+    
+    def _handle_swift_link(self, lib_str):
+        """Handle %swift_link directive."""
+        libs = lib_str.strip().split()
+        for lib in libs:
+            if lib.startswith('-l'):
+                self.custom_swift_flags.append(lib)
+            else:
+                self.custom_swift_flags.append(f'-l{lib}')
+        self.send_response(self.iopub_socket, 'stream', {
+            'name': 'stdout',
+            'text': f'✅ Added libraries: {" ".join(libs)}\n'
+        })
+    
+    def _handle_swift_framework_path(self, path_str):
+        """Handle %swift_framework_path directive (macOS)."""
+        paths = path_str.strip().split(':')
+        added = []
+        for path in paths:
+            path = os.path.expanduser(path.strip())
+            if not path:
+                continue
+            if os.path.isdir(path):
+                path = os.path.abspath(path)
+                if path not in self.custom_framework_paths:
+                    self.custom_framework_paths.append(path)
+                    self.custom_swift_flags.extend(['-F', path])
+                    if hasattr(self, 'debugger') and self.debugger:
+                        self.debugger.HandleCommand(
+                            f'settings append target.swift-framework-search-paths "{path}"')
+                    added.append(path)
+            else:
+                self.send_response(self.iopub_socket, 'stream', {
+                    'name': 'stderr',
+                    'text': f'⚠️  Path does not exist: {path}\n'
+                })
+        if added:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'✅ Added framework paths: {":".join(added)}\n'
+            })
+    
+    def _handle_swiftir_setup(self, sdk_path):
+        """Handle %swiftir_setup convenience directive."""
+        sdk_path = os.path.expanduser(sdk_path.strip())
+        if not os.path.isdir(sdk_path):
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stderr',
+                'text': f'❌ SDK path does not exist: {sdk_path}\n'
+            })
+            return
+        
+        self.send_response(self.iopub_socket, 'stream', {
+            'name': 'stdout',
+            'text': f'🔧 Setting up SwiftIR SDK from: {sdk_path}\n'
+        })
+        
+        lib_path = os.path.join(sdk_path, 'lib')
+        if os.path.isdir(lib_path):
+            self._add_custom_library_path(lib_path)
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'   📚 Library path: {lib_path}\n'
+            })
+        
+        for mod_dir in ['swift-modules', 'modules']:
+            mod_path = os.path.join(sdk_path, mod_dir)
+            if os.path.isdir(mod_path):
+                self._add_custom_module_path(mod_path)
+                self.send_response(self.iopub_socket, 'stream', {
+                    'name': 'stdout',
+                    'text': f'   📦 Module path: {mod_path}\n'
+                })
+        
+        inc_path = os.path.join(sdk_path, 'include')
+        if os.path.isdir(inc_path):
+            self.custom_swift_flags.extend(['-I', inc_path])
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': f'   📁 Include path: {inc_path}\n'
+            })
+        
+        self.custom_env_vars['SWIFTIR_HOME'] = sdk_path
+        os.environ['SWIFTIR_HOME'] = sdk_path
+        if hasattr(self, 'debugger') and self.debugger:
+            self.debugger.HandleCommand(f'settings append target.env-vars SWIFTIR_HOME={sdk_path}')
+        
+        self.send_response(self.iopub_socket, 'stream', {
+            'name': 'stdout',
+            'text': f'   🌍 SWIFTIR_HOME={sdk_path}\n'
+        })
+        self.send_response(self.iopub_socket, 'stream', {
+            'name': 'stdout',
+            'text': '✅ SwiftIR SDK configured! You can now `import SwiftIRRuntime`\n'
+        })
+    
+    def _handle_swift_config(self):
+        """Handle %swift_config to display configuration."""
+        lines = [
+            '┌─────────────────────────────────────────┐',
+            '│       Swift Kernel Configuration       │',
+            '└─────────────────────────────────────────┘', ''
+        ]
+        lines.append('📌 Compiler Flags:')
+        if self.custom_swift_flags:
+            for flag in self.custom_swift_flags:
+                lines.append(f'   {flag}')
+        else:
+            lines.append('   (none)')
+        lines.append('')
+        lines.append('📚 Library Paths (LD_LIBRARY_PATH):')
+        if self.custom_library_paths:
+            for path in self.custom_library_paths:
+                lines.append(f'   {path}')
+        else:
+            lines.append('   (none)')
+        lines.append('')
+        lines.append('📦 Module Search Paths:')
+        if self.custom_module_paths:
+            for path in self.custom_module_paths:
+                lines.append(f'   {path}')
+        else:
+            lines.append('   (none)')
+        lines.append('')
+        lines.append('🖼️  Framework Paths:')
+        if self.custom_framework_paths:
+            for path in self.custom_framework_paths:
+                lines.append(f'   {path}')
+        else:
+            lines.append('   (none)')
+        lines.append('')
+        lines.append('🌍 Environment Variables:')
+        if self.custom_env_vars:
+            for name, value in self.custom_env_vars.items():
+                lines.append(f'   {name}={value}')
+        else:
+            lines.append('   (none)')
+        lines.append('')
+        self.send_response(self.iopub_socket, 'stream', {
+            'name': 'stdout',
+            'text': '\n'.join(lines) + '\n'
+        })
+    
+    def _add_custom_library_path(self, path):
+        """Helper to add a library path."""
+        path = os.path.abspath(path)
+        if path not in self.custom_library_paths:
+            self.custom_library_paths.append(path)
+            current = os.environ.get('LD_LIBRARY_PATH', '')
+            if path not in current:
+                new_ld = f"{path}:{current}" if current else path
+                os.environ['LD_LIBRARY_PATH'] = new_ld
+                if hasattr(self, 'debugger') and self.debugger:
+                    self.debugger.HandleCommand(f'settings append target.env-vars LD_LIBRARY_PATH={new_ld}')
+    
+    def _add_custom_module_path(self, path):
+        """Helper to add a Swift module search path."""
+        path = os.path.abspath(path)
+        if path not in self.custom_module_paths:
+            self.custom_module_paths.append(path)
+            if hasattr(self, 'debugger') and self.debugger:
+                self.debugger.HandleCommand(f'settings append target.swift-module-search-paths "{path}"')
+
+
+
+class SwiftKernel(SwiftIRDirectivesMixin, Kernel):
     implementation = 'SwiftKernel'
     implementation_version = '0.1'
     banner = ''
@@ -667,6 +999,9 @@ class SwiftKernel(Kernel):
         self.log.addHandler(file_handler)
         self.log.setLevel(logging.DEBUG)
         self.log.info("SwiftKernel initialized with file logging")
+
+        # Initialize SwiftIR directives support
+        self._init_swiftir_directives()
 
         # We don't initialize Swift yet, so that the user has a chance to
         # "%install" packages before Swift starts. (See doc comment in
@@ -1306,6 +1641,12 @@ class SwiftKernel(Kernel):
     def _preprocess(self, code):
         # Check for magic commands first (they consume the entire cell)
         stripped = code.strip()
+
+        # Check for SwiftIR directives first
+        handled, result = self._process_swiftir_directive(code)
+        if handled:
+            return result if result is not None else ''
+
 
         # Handle magic commands that process the whole cell
         if stripped.startswith('%who'):

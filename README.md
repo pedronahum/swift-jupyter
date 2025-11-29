@@ -122,6 +122,39 @@ plt.show()
 | `%timeit <code>` | Time code execution |
 | `%install` | Install Swift packages |
 
+## Pre-compiled Library Directives
+
+For pre-compiled Swift libraries that cannot use `%install` (due to SPM's unsafeFlags restrictions):
+
+| Directive | Example | Description |
+|-----------|---------|-------------|
+| `%swiftir_setup` | `%swiftir_setup /opt/sdk` | One-line SDK setup (recommended) |
+| `%swift_library_path` | `%swift_library_path /opt/lib` | Add to LD_LIBRARY_PATH |
+| `%swift_module_path` | `%swift_module_path /opt/modules` | Add Swift module search paths |
+| `%swift_env` | `%swift_env MY_VAR=/opt` | Set environment variables |
+| `%swift_flags` | `%swift_flags -I/path -L/path` | Add compiler flags |
+| `%swift_link` | `%swift_link MyLibrary` | Link libraries |
+| `%swift_framework_path` | `%swift_framework_path /opt/fw` | Add framework paths (macOS) |
+| `%swift_config` | `%swift_config` | Display current configuration |
+
+Example usage:
+
+```swift
+// Set up a pre-compiled SDK
+%swiftir_setup /opt/swiftir-deps
+
+// Or configure paths individually
+%swift_library_path /opt/mylib/lib
+%swift_module_path /opt/mylib/swift-modules
+%swift_link MyRuntime
+
+// Verify configuration
+%swift_config
+
+// Now import and use
+import MyRuntime
+```
+
 ## Compatibility
 
 | Component | Version |
