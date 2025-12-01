@@ -117,10 +117,18 @@ plt.show()
 | Command | Description |
 |---------|-------------|
 | `%help` | Show available commands |
+| `%lsmagic` | List all magic commands |
 | `%who` | List defined variables |
 | `%reset` | Clear all state |
 | `%timeit <code>` | Time code execution |
+| `%env [VAR[=VALUE]]` | Show/set environment variables |
+| `%swift-version` | Show Swift toolchain information |
+| `%load <file>` | Load and execute a Swift file |
+| `%save <file>` | Save execution history to file |
+| `%history [-n N]` | Show execution history |
 | `%install` | Install Swift packages |
+| `%enable_completion` | Enable code completion |
+| `%disable_completion` | Disable code completion |
 
 ## Pre-compiled Library Directives
 

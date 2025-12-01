@@ -897,15 +897,104 @@ class SwiftIRDirectivesMixin:
         os.environ['SWIFTIR_HOME'] = sdk_path
         if hasattr(self, 'debugger') and self.debugger:
             self.debugger.HandleCommand(f'settings append target.env-vars SWIFTIR_HOME={sdk_path}')
-        
+
         self.send_response(self.iopub_socket, 'stream', {
             'name': 'stdout',
             'text': f'   🌍 SWIFTIR_HOME={sdk_path}\n'
         })
-        self.send_response(self.iopub_socket, 'stream', {
-            'name': 'stdout',
-            'text': '✅ SwiftIR SDK configured! You can now `import SwiftIRRuntime`\n'
-        })
+
+        # Load dynamic libraries if present
+        lib_path = os.path.join(sdk_path, 'lib')
+        dynamic_libs_loaded = []
+        if os.path.isdir(lib_path):
+            # Look for SwiftIR dynamic libraries
+            for lib_name in ['libSwiftIRRuntimeDynamic.so', 'libSwiftIR.so']:
+                lib_file = os.path.join(lib_path, lib_name)
+                if os.path.isfile(lib_file):
+                    # Determine dlopen module based on platform
+                    import platform
+                    dlopen_module = 'Darwin' if platform.system() == 'Darwin' else 'Glibc'
+
+                    dlopen_code = f'''
+import func {dlopen_module}.dlopen
+import var {dlopen_module}.RTLD_NOW
+dlopen("{lib_file}", RTLD_NOW)
+'''
+                    result = self._execute(dlopen_code)
+                    if isinstance(result, SuccessWithValue):
+                        dynamic_libs_loaded.append(lib_name)
+                        self.send_response(self.iopub_socket, 'stream', {
+                            'name': 'stdout',
+                            'text': f'   🔗 Loaded: {lib_name}\n'
+                        })
+                    else:
+                        self.send_response(self.iopub_socket, 'stream', {
+                            'name': 'stderr',
+                            'text': f'   ⚠️ Failed to load {lib_name}\n'
+                        })
+
+        # Try to compile SwiftIRRuntime sources if available (more reliable than pre-built modules)
+        sources_compiled = False
+        sources_path = os.path.join(sdk_path, 'swift-sources', 'SwiftIRRuntime')
+        if os.path.isdir(sources_path):
+            # Find all .swift files
+            swift_files = sorted([f for f in os.listdir(sources_path) if f.endswith('.swift')])
+            if swift_files:
+                self.send_response(self.iopub_socket, 'stream', {
+                    'name': 'stdout',
+                    'text': f'   📝 Compiling SwiftIRRuntime sources ({len(swift_files)} files)...\n'
+                })
+
+                # Read and execute each source file
+                all_sources = []
+                for swift_file in swift_files:
+                    file_path = os.path.join(sources_path, swift_file)
+                    try:
+                        with open(file_path, 'r') as f:
+                            content = f.read()
+                            # Skip the file's import Foundation if we already have it
+                            all_sources.append(content)
+                    except Exception as e:
+                        self.send_response(self.iopub_socket, 'stream', {
+                            'name': 'stderr',
+                            'text': f'   ⚠️ Failed to read {swift_file}: {e}\n'
+                        })
+
+                # Compile all sources together
+                if all_sources:
+                    combined_source = '\n'.join(all_sources)
+                    result = self._execute(combined_source)
+                    if isinstance(result, SuccessWithValue) or (hasattr(result, 'result') and result.result is None):
+                        sources_compiled = True
+                        self.send_response(self.iopub_socket, 'stream', {
+                            'name': 'stdout',
+                            'text': '   ✅ SwiftIRRuntime compiled successfully!\n'
+                        })
+                    else:
+                        self.send_response(self.iopub_socket, 'stream', {
+                            'name': 'stderr',
+                            'text': f'   ⚠️ Compilation had issues (types may still be available)\n'
+                        })
+
+        if sources_compiled:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': '✅ SwiftIR SDK ready! Use: RuntimeDetector.detect(), AcceleratorType.cpu, etc.\n'
+            })
+        elif dynamic_libs_loaded:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': '✅ SwiftIR SDK configured! You can now `import SwiftIRRuntime`\n'
+            })
+        else:
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': '✅ SwiftIR SDK configured (module paths set).\n'
+            })
+            self.send_response(self.iopub_socket, 'stream', {
+                'name': 'stdout',
+                'text': '   💡 Note: For full REPL support, include swift-sources/ or libSwiftIRRuntimeDynamic.so in the SDK.\n'
+            })
     
     def _handle_swift_config(self):
         """Handle %swift_config to display configuration."""
@@ -1896,6 +1985,7 @@ Line Magics (single line):
 Package Management:
   %install SPEC MODULE      Install Swift package
   %install-swiftpm-flags    Set SwiftPM build flags
+  %install-swiftpm-env      Set SwiftPM environment variables (e.g. KEY=value)
   %install-location PATH    Set package install location
 
 Kernel Control:
@@ -2242,6 +2332,7 @@ Kernel Control:
         processed_lines = []
         all_packages = []
         all_swiftpm_flags = []
+        all_swiftpm_env = {}
         extra_include_commands = []
         user_install_location = None
         for index, line in enumerate(code.split('\n')):
@@ -2250,6 +2341,8 @@ Kernel Control:
             line, swiftpm_flags = self._process_install_swiftpm_flags_line(
                     line)
             all_swiftpm_flags += swiftpm_flags
+            line, swiftpm_env = self._process_install_swiftpm_env_line(line)
+            all_swiftpm_env.update(swiftpm_env)
             line, packages = self._process_install_line(index, line)
             line, extra_include_command = \
                 self._process_extra_include_command_line(line)
@@ -2261,7 +2354,8 @@ Kernel Control:
 
         self._install_packages(all_packages, all_swiftpm_flags,
                                extra_include_commands,
-                               user_install_location)
+                               user_install_location,
+                               all_swiftpm_env)
         return '\n'.join(processed_lines)
 
     def _process_install_location_line(self, line):
@@ -2300,6 +2394,22 @@ Kernel Control:
             return line, []
         flags = shlex.split(install_swiftpm_flags_match.group(1))
         return '', flags
+
+    def _process_install_swiftpm_env_line(self, line):
+        """Process %install-swiftpm-env directives.
+
+        Example: %install-swiftpm-env SWIFTIR_USE_SDK=1 SWIFTIR_DEPS=/opt/swiftir-deps
+        """
+        install_swiftpm_env_match = re.match(
+                r'^\s*%install-swiftpm-env (.*)$', line)
+        if install_swiftpm_env_match is None:
+            return line, {}
+        env_vars = {}
+        for item in shlex.split(install_swiftpm_env_match.group(1)):
+            if '=' in item:
+                key, value = item.split('=', 1)
+                env_vars[key] = value
+        return '', env_vars
 
     def _process_install_line(self, line_index, line):
         install_match = re.match(r'^\s*%install (.*)$', line)
@@ -2370,7 +2480,7 @@ Kernel Control:
         })
 
     def _install_packages(self, packages, swiftpm_flags, extra_include_commands,
-                          user_install_location):
+                          user_install_location, swiftpm_env_vars=None):
         if len(packages) == 0 and len(swiftpm_flags) == 0:
             return
 
@@ -2527,10 +2637,14 @@ Kernel Control:
         self._send_install_progress(2, 5, '🌐 Resolving and fetching dependencies (this may take a while...)')
 
         # TODO(TF-1179): Remove this workaround after fixing SwiftPM.
-        swiftpm_env = os.environ
+        swiftpm_env = os.environ.copy()
         libuuid_path = '/lib/x86_64-linux-gnu/libuuid.so.1'
         if os.path.isfile(libuuid_path):
             swiftpm_env['LD_PRELOAD'] = libuuid_path
+
+        # Add user-provided environment variables for SDK mode etc.
+        if swiftpm_env_vars:
+            swiftpm_env.update(swiftpm_env_vars)
 
         import time
         start_time = time.time()
